@@ -1,15 +1,32 @@
-*.iml
-.gradle
+# --- 修正・追加した項目 ---
+.gradle/
+/build/
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
+.kotlin/
+
+# --- IDE (Android Studio) 設定 ---
+*.iml
 /.idea/workspace.xml
+/.idea/libraries
+/.idea/caches
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
+/.idea/modules.xml
+/.idea/deploymentTargetSelector.xml
+/.idea/studiobot.xml
+/.idea/misc.xml
+/.idea/gradle.xml
+/.idea/compiler.xml
+/.idea/runConfigurations.xml
+/.idea/shelf/
+/.idea/assetWizardSettings.xml
+
+# --- その他 OS / Android 特有 ---
 .DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
+/captures/
+*.apk
+*.aar
+*.hprof
+.externalNativeBuild/
+.cxx/
+.idea/

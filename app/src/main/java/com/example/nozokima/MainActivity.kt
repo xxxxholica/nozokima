@@ -1,787 +1,758 @@
-@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 
 package com.example.nozokima
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.Manifest
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
+import androidx.biometric.BiometricPrompt
+import androidx.biometric.BiometricManager
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.animation.*
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import ui.thema.*
-import java.util.Calendar
-import java.util.UUID
-import kotlin.random.Random
+import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.nozokima.ui.components.*
+import com.example.nozokima.ui.screens.*
+import com.example.nozokima.util.*
+import com.example.nozokima.data.local.entities.*
+import com.example.nozokima.data.manager.*
+import com.example.nozokima.ui.viewmodel.MainViewModel
+import com.example.nozokima.ui.viewmodel.HomeViewModel
+import com.example.nozokima.ui.viewmodel.ViewModelFactory
+import kotlinx.coroutines.launch
+import ui.theme.*
+import java.text.SimpleDateFormat
+import java.util.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.unit.IntOffset
 
-// --- データモデル ---
+class MainActivity : FragmentActivity() {
+    private val db by lazy { (application as NozokimaApplication).database }
+    private val gemini by lazy { (application as NozokimaApplication).geminiModel }
+    private val ocrManager by lazy { OcrManager(this) }
 
-data class AssetItemData(
-    val id: String = UUID.randomUUID().toString(),
-    val name: String,
-    val amount: Int
-)
+    private fun showBiometricPrompt(
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit = {},
+    ) {
+        val executor = ContextCompat.getMainExecutor(this)
+        val biometricPrompt =
+            BiometricPrompt(
+                this,
+                executor,
+                object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    onSuccess()
+                }
 
-data class AssetCategoryData(
-    val id: String = UUID.randomUUID().toString(),
-    var title: String,
-    val items: SnapshotStateList<AssetItemData>
-)
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    if ((errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON) && (errorCode != BiometricPrompt.ERROR_USER_CANCELED)) {
+                        onError(errString.toString())
+                    }
+                }
+                },
+            )
 
-data class ChatMessage(
-    val id: String = UUID.randomUUID().toString(),
-    val text: String = "",
-    val imageUri: android.net.Uri? = null,
-    val isUser: Boolean = true
-)
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("生体認証")
+            .setSubtitle("ロックを解除してください")
+            .setNegativeButtonText("パスワードを使用")
+            .build()
 
-// --- メインアクティビティ ---
+        biometricPrompt.authenticate(promptInfo)
+    }
 
-class MainActivity : ComponentActivity() {
+    private fun isBiometricAvailable(): Boolean {
+        val biometricManager = BiometricManager.from(this)
+        return biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            var selectedTab by remember { mutableIntStateOf(0) }
+        WindowCompat.setDecorFitsSystemWindows(window, false)
 
-            Surface(modifier = Modifier.fillMaxSize(), color = NotionBackground) {
-                Scaffold(
-                    bottomBar = {
-                        NavigationBar(containerColor = NotionWhite, tonalElevation = 0.dp) {
-                            val items = listOf("ホーム", "記録", "資産状況", "AI相談")
-                            val icons = listOf(Icons.Default.Home, Icons.Default.Add, Icons.Default.List, Icons.Default.Face)
-                            items.forEachIndexed { index, item ->
-                                NavigationBarItem(
-                                    icon = { Icon(icons[index], contentDescription = item) },
-                                    label = { Text(item, fontSize = 10.sp) },
-                                    selected = selectedTab == index,
-                                    onClick = { selectedTab = index },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = NotionSafeGreen,
-                                        unselectedIconColor = NotionTextSecondary,
-                                        indicatorColor = Color.Transparent
-                                    )
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 0)
+        }
+
+        setContent {
+            val dao = remember { db.financeDao() }
+            val factory = remember { ViewModelFactory(dao, gemini) }
+            val mainViewModel: MainViewModel = viewModel(factory = factory)
+            val homeViewModel: HomeViewModel = viewModel(factory = factory)
+            
+            val mainUiState by mainViewModel.uiState.collectAsState()
+
+            val appSettings = mainUiState.appSettings ?: AppSettingsEntity()
+            val themeMode = appSettings.themeMode
+
+            NozokimaTheme(themeMode = themeMode) {
+                val view = androidx.compose.ui.platform.LocalView.current
+                val isDark = isSystemInDarkTheme()
+                val currentThemeMode = themeMode
+                
+                if (!view.isInEditMode) {
+                    SideEffect {
+                        val window = (view.context as android.app.Activity).window
+                        val isAppearanceLight: Boolean = when (currentThemeMode) {
+                            "LIGHT" -> true
+                            "DARK" -> false
+                            else -> !isDark
+                        }
+                        WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = isAppearanceLight
+                    }
+                }
+
+                val scope = rememberCoroutineScope()
+            val snackbarHostState = remember { SnackbarHostState() }
+
+            var selectedTab by remember { mutableIntStateOf(0) }
+            var initialHomeAdviceText by remember { mutableStateOf<String?>(null) }
+            var recoveryLending by remember { mutableStateOf<LendingEntity?>(null) }
+            var initialInputMode by remember { mutableStateOf<String?>(null) }
+            var initialHistoryMode by remember { mutableStateOf(value = false) }
+            var initialScheduledMode by remember { mutableStateOf(value = false) }
+
+            var backupPassword by remember { mutableStateOf("") }
+            var showBackupPasswordDialog by remember { mutableStateOf(value = false) }
+            var backupMode by remember { mutableStateOf("") }
+            var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
+            var showAppLockPasswordDialog by remember { mutableStateOf(value = false) }
+            var appLockDialogMode by remember { mutableStateOf("set") }
+
+            val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
+            val isAppLocked = rememberSaveable { mutableStateOf(value = true) }
+            val isExternalActivityLaunching = rememberSaveable { mutableStateOf(false) }
+            val appSettings = mainUiState.appSettings ?: AppSettingsEntity()
+            val isLoading = !mainUiState.isLoaded
+            val isSetupCompleted = appSettings.isSetupCompleted
+            val showLockScreen = isAppLocked.value && appSettings.isAppLockEnabled
+            val lifecycle = LocalLifecycleOwner.current.lifecycle
+
+            DisposableEffect(lifecycle) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_STOP) {
+                        if (!isExternalActivityLaunching.value) isAppLocked.value = true
+                    } else if (event == Lifecycle.Event.ON_RESUME) {
+                        isExternalActivityLaunching.value = false
+                    }
+                }
+                lifecycle.addObserver(observer)
+                onDispose { lifecycle.removeObserver(observer) }
+            }
+
+            var currentChatSessionId by rememberSaveable { mutableStateOf<String?>(null) }
+
+            val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+                uri?.let {
+                    scope.launch {
+                        try {
+                            val zipData = BackupManager(dao, applicationContext).exportData(backupPassword)
+                            contentResolver.openOutputStream(it)?.use { output ->
+                                output.write(zipData)
+                            }
+                            snackbarHostState.showSnackbar("データをエクスポートしました")
+                        } catch (e: Exception) {
+                            snackbarHostState.showSnackbar("エクスポートに失敗しました: ${e.message}")
+                        } finally {
+                            backupPassword = ""
+                        }
+                    }
+                }
+            }
+
+            val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                uri?.let {
+                    pendingImportUri = it
+                    backupMode = "import"
+                    showBackupPasswordDialog = true
+                }
+            }
+
+            LaunchedEffect(Unit) {
+                mainViewModel.checkAiStatus()
+            }
+
+            val context = LocalContext.current
+            val activity = remember(context) { context as? android.app.Activity }
+            DisposableEffect(showBackupPasswordDialog) {
+                if (showBackupPasswordDialog && (backupMode == "export")) {
+                    activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                }
+                onDispose { activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) }
+            }
+
+            if (showAppLockPasswordDialog) {
+                var currentPasswordInput by remember { mutableStateOf("") }
+                var newPasswordInput by remember { mutableStateOf("") }
+                var confirmPasswordInput by remember { mutableStateOf("") }
+                var step by remember { mutableIntStateOf(0) }
+                val isDisableMode = appLockDialogMode == "disable"
+                val isChangeMode = appLockDialogMode == "change"
+
+                ModalBottomSheet(
+                    onDismissRequest = { showAppLockPasswordDialog = false },
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) },
+                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 32.dp)
+                            .padding(bottom = 40.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        val title = when(appLockDialogMode) {
+                            "set" -> if (step == 0) "パスワードの設定" else "パスワードの確認"
+                            "change" -> when(step) {
+                                0 -> "現在のパスワード"
+                                1 -> "新しいパスワード"
+                                else -> "パスワードの確認"
+                            }
+                            else -> "ロックの解除"
+                        }
+                        
+                        Text(text = title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        
+                        Spacer(Modifier.height(12.dp))
+                        
+                        val description = when {
+                            isDisableMode -> "ロックを解除するには現在のパスワードを入力してください"
+                            isChangeMode -> when(step) {
+                                0 -> "現在のパスワードを入力してください"
+                                1 -> "新しいパスワードを入力してください"
+                                else -> "もう一度入力してください"
+                            }
+                            else -> if (step == 0) "パスワードを入力してください" else "もう一度入力してください"
+                        }
+                        Text(description, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        
+                        Spacer(Modifier.height(32.dp))
+                        
+                        val currentInputText = when(step) {
+                            0 -> currentPasswordInput
+                            1 -> newPasswordInput
+                            else -> confirmPasswordInput
+                        }
+                        
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Spacer(Modifier.weight(1f))
+                            // パスワードの入力インジケーターをリッチに
+                            repeat(4) { index ->
+                                val isActive = index < currentInputText.length
+                                Box(
+                                    modifier = Modifier
+                                        .size(if (isActive) 16.dp else 14.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isActive) NotionSafeGreen else MaterialTheme.colorScheme.outline)
+                                        .then(if (isActive) Modifier.border(2.dp, NotionSafeGreen.copy(alpha = 0.2f), CircleShape) else Modifier)
                                 )
                             }
+                            Spacer(Modifier.weight(1f))
                         }
-                    }
-                ) { innerPadding ->
-                    Box(modifier = Modifier.padding(innerPadding)) {
-                        when (selectedTab) {
-                            0 -> HomeScreen()
-                            1 -> InputScreen()
-                            2 -> AssetsScreen()
-                            3 -> ConsultationScreen()
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// --- 1. ホーム画面 ---
-
-@Composable
-fun HomeScreen() {
-    val greeting = remember {
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-        when (hour) {
-            in 5..10 -> "おはようございます"
-            in 11..17 -> "こんにちは"
-            else -> "こんばんは"
-        }
-    }
-
-    val initialAssets = 300000
-    val currentAssets = 158000
-    val assetProgress = currentAssets.toFloat() / initialAssets.toFloat()
-
-    val goalName = "サイドFIRE"
-    val goalProgress = 0.45f
-    val remainingDays = 450
-    val acceleration = "+ 1.2 日"
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 24.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(bottom = 40.dp, top = 8.dp)
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.nozokima),
-                contentDescription = "App Icon",
-                modifier = Modifier.size(40.dp),
-                tint = Color.Unspecified
-            )
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(
-                text = greeting,
-                color = NotionTextPrimary,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.5).sp
-            )
-        }
-
-        Text("利用可能な資産", color = NotionTextSecondary, style = MaterialTheme.typography.titleSmall)
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                text = "¥ ${String.format("%,d", currentAssets)}",
-                color = NotionTextPrimary,
-                fontSize = 36.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-1).sp
-            )
-            Text(
-                text = " / ¥ ${String.format("%,d", initialAssets)}",
-                color = NotionTextSecondary,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(bottom = 6.dp, start = 4.dp)
-            )
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-        LinearProgressIndicator(
-            progress = { assetProgress },
-            modifier = Modifier.fillMaxWidth().height(6.dp),
-            color = NotionSafeGreen,
-            trackColor = NotionBorder,
-            strokeCap = StrokeCap.Round
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        Text("リセットまであと 15 日", color = NotionTextSecondary, style = MaterialTheme.typography.bodyMedium)
-
-        Spacer(modifier = Modifier.height(48.dp))
-
-        Text("今月の統計", color = NotionTextSecondary, style = MaterialTheme.typography.titleSmall)
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            SummaryCard(
-                title = "合計",
-                value = "¥ 62,400",
-                comparison = "-12%",
-                modifier = Modifier.weight(1f).fillMaxHeight()
-            )
-            SummaryCard(
-                title = "最大",
-                value = "¥ 32,800",
-                subValue = "高性能キーボード",
-                comparison = "+5%",
-                modifier = Modifier.weight(1f).fillMaxHeight()
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
-                .background(Color.White, RoundedCornerShape(12.dp))
-                .padding(20.dp)
-        ) {
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(color = Color(0xFFE8F0FE), shape = RoundedCornerShape(50.dp)) {
-                            Text(
-                                text = "AI分析",
-                                color = Color(0xFF1A73E8),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("ウィークリーサマリー", color = NotionTextSecondary, style = MaterialTheme.typography.labelMedium)
-                    }
-                    IconButton(onClick = { }, modifier = Modifier.size(24.dp)) {
-                        Icon(imageVector = Icons.Default.Refresh, contentDescription = null, tint = NotionTextSecondary, modifier = Modifier.size(16.dp))
+                        
+                        Spacer(Modifier.height(40.dp))
+                        
+                        PinKeypad(
+                            onNumberClick = { num ->
+                                when(step) {
+                                    0 -> if (currentPasswordInput.length < 4) currentPasswordInput += num
+                                    1 -> if (newPasswordInput.length < 4) newPasswordInput += num
+                                    2 -> if (confirmPasswordInput.length < 4) confirmPasswordInput += num
+                                }
+                            },
+                            onDeleteClick = {
+                                when(step) {
+                                    0 -> if (currentPasswordInput.isNotEmpty()) currentPasswordInput = currentPasswordInput.dropLast(1)
+                                    1 -> if (newPasswordInput.isNotEmpty()) newPasswordInput = newPasswordInput.dropLast(1)
+                                    2 -> if (confirmPasswordInput.isNotEmpty()) confirmPasswordInput = confirmPasswordInput.dropLast(1)
+                                }
+                            },
+                            onConfirmClick = {
+                                when {
+                                    isDisableMode -> {
+                                        if ((appSettings.appLockPassword != null) && (currentPasswordInput == appSettings.appLockPassword)) {
+                                            scope.launch {
+                                                dao.upsertAppSettings(appSettings.copy(isAppLockEnabled = false, isBiometricEnabled = false))
+                                                showAppLockPasswordDialog = false
+                                            }
+                                        } else {
+                                            scope.launch { snackbarHostState.showSnackbar("パスワードが正しくありません") }
+                                            currentPasswordInput = ""
+                                        }
+                                    }
+                                    isChangeMode -> {
+                                        when(step) {
+                                            0 -> {
+                                                if (currentPasswordInput == appSettings.appLockPassword) step = 1
+                                                else {
+                                                    scope.launch { snackbarHostState.showSnackbar("現在のパスワードが正しくありません") }
+                                                    currentPasswordInput = ""
+                                                }
+                                            }
+                                            1 -> step = 2
+                                            2 -> {
+                                                if (newPasswordInput == confirmPasswordInput) {
+                                                    scope.launch {
+                                                        dao.upsertAppSettings(appSettings.copy(appLockPassword = newPasswordInput, isAppLockEnabled = true))
+                                                        showAppLockPasswordDialog = false
+                                                        snackbarHostState.showSnackbar("パスワードを変更しました")
+                                                    }
+                                                } else {
+                                                    scope.launch { snackbarHostState.showSnackbar("パスワードが一致しません") }
+                                                    confirmPasswordInput = ""
+                                                }
+                                            }
+                                        }
+                                    }
+                                    else -> {
+                                        if (step == 0) {
+                                            if (currentPasswordInput.length >= 4) {
+                                                newPasswordInput = currentPasswordInput
+                                                step = 2
+                                            }
+                                        } else {
+                                            if (newPasswordInput == confirmPasswordInput) {
+                                                scope.launch {
+                                                    dao.upsertAppSettings(appSettings.copy(appLockPassword = newPasswordInput, isAppLockEnabled = true, isBiometricEnabled = true))
+                                                    showAppLockPasswordDialog = false
+                                                    snackbarHostState.showSnackbar("パスワードを設定しました")
+                                                }
+                                            } else {
+                                                scope.launch { snackbarHostState.showSnackbar("パスワードが一致しません") }
+                                                confirmPasswordInput = ""
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            isConfirmEnabled = when(step) {
+                                0 -> currentPasswordInput.length >= 4
+                                1 -> newPasswordInput.length >= 4
+                                else -> confirmPasswordInput.length >= 4
+                            },
+                            confirmLabel = if (isDisableMode) "解除" else if (isChangeMode && step < 2 || !isChangeMode && step == 0) "次へ" else "確定"
+                        )
                     }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "今週は食費が前週比で20%抑制されており、理想的な推移です。最大の出費となった「キーボード」は自己研鑽のスコアが高いため、投資としてカウントされています。目標達成がさらに0.5日加速する見込みです。",
-                    color = NotionTextPrimary,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(48.dp))
-
-        Text("目標", color = NotionTextSecondary, style = MaterialTheme.typography.titleSmall)
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
-                .background(Color.White, RoundedCornerShape(12.dp))
-                .padding(24.dp)
-        ) {
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = goalName, color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "残り $remainingDays 日", color = NotionTextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(text = "${(goalProgress * 100).toInt()}%", color = NotionSafeGreen, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                LinearProgressIndicator(
-                    progress = { goalProgress },
-                    modifier = Modifier.fillMaxWidth().height(8.dp),
-                    color = NotionSafeGreen,
-                    trackColor = NotionBorder,
-                    strokeCap = StrokeCap.Round
-                )
-                Spacer(modifier = Modifier.height(20.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("目標達成までの加速", color = NotionTextSecondary, style = MaterialTheme.typography.labelMedium)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = acceleration, color = NotionSafeGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                }
-                Text(
-                    text = "「今日お金を使わない」という選択が未来を引き寄せました。",
-                    color = NotionTextSecondary,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(40.dp))
-    }
-}
-
-@Composable
-fun SummaryCard(title: String, value: String, subValue: String? = null, comparison: String? = null, modifier: Modifier = Modifier) {
-    Box(modifier = modifier.border(1.dp, NotionBorder, RoundedCornerShape(12.dp)).background(Color.White, RoundedCornerShape(12.dp)).padding(20.dp)) {
-        Column {
-            Text(text = title, color = NotionTextSecondary, style = MaterialTheme.typography.labelMedium)
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(text = value, color = NotionTextPrimary, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            if (subValue != null) {
-                Text(text = subValue, color = NotionTextSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
-            }
-        }
-        if (comparison != null) {
-            val isIncrease = comparison.startsWith("+")
-            val badgeBgColor = if (isIncrease) Color(0xFFFFF1F1) else Color(0xFFF0F9F4)
-            val badgeTextColor = if (isIncrease) Color(0xFFE57373) else NotionSafeGreen
-            Surface(modifier = Modifier.align(Alignment.TopEnd).widthIn(min = 56.dp), color = badgeBgColor, shape = RoundedCornerShape(50.dp)) {
-                Text(text = comparison, color = badgeTextColor, fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-            }
-        }
-    }
-}
-
-// --- 2. 記録画面 ---
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun InputScreen() {
-    var amountText by remember { mutableStateOf("") }
-    var selfBurdenText by remember { mutableStateOf("") } // 自己負担額
-    var memoText by remember { mutableStateOf("") }
-    var selectedAsset by remember { mutableStateOf("未選択") }
-    var showAssetSheet by remember { mutableStateOf(false) }
-
-    // 数値計算ロジック
-    val totalAmount = amountText.toIntOrNull() ?: 0
-    val selfBurden = selfBurdenText.toIntOrNull() ?: totalAmount
-    // 返済予定額 = 総額 - 自己負担額 (マイナスにならないよう調整)
-    val reimbursement = if (amountText.isNotEmpty()) (totalAmount - selfBurden).coerceAtLeast(0) else 0
-
-    val assetOptions = listOf("現金", "楽天銀行", "PayPay", "PASMO", "ANA PAY")
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 24.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        Text("消費の記録", color = NotionTextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // 1. 金額入力セクション
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
-                .background(Color.White, RoundedCornerShape(12.dp))
-                .padding(24.dp)
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("支払総額", color = NotionTextSecondary, style = MaterialTheme.typography.labelMedium)
-                Spacer(modifier = Modifier.height(8.dp))
-                androidx.compose.foundation.text.BasicTextField(
-                    value = amountText,
-                    onValueChange = { if (it.all { char -> char.isDigit() }) amountText = it },
-                    textStyle = androidx.compose.ui.text.TextStyle(
-                        color = NotionTextPrimary,
-                        fontSize = 42.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    decorationBox = { innerTextField ->
-                        if (amountText.isEmpty()) {
-                            Text("¥ 0", color = NotionBorder, fontSize = 42.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-                        }
-                        innerTextField()
-                    }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // 2. 詳細設定（支払い元・負担区分）
-        Text("支払い詳細", color = NotionTextSecondary, style = MaterialTheme.typography.titleSmall)
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
-                .background(Color.White, RoundedCornerShape(12.dp))
-        ) {
-            // 支払い元
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable { showAssetSheet = true }.padding(20.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("支払い元", color = NotionTextPrimary, fontWeight = FontWeight.Medium)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = selectedAsset, color = if (selectedAsset == "未選択") NotionTextSecondary else Color(0xFF2196F3), fontWeight = FontWeight.Bold)
-                    Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = NotionTextSecondary)
-                }
             }
 
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp), thickness = 0.5.dp, color = NotionBorder)
+            if (showBackupPasswordDialog) {
+                val context = LocalContext.current
+                val autofillManager = remember { context.getSystemService(android.view.autofill.AutofillManager::class.java) }
+                var passwordText by remember { mutableStateOf("") }
+                var confirmPasswordText by remember { mutableStateOf("") }
+                var isPasswordVisible by remember { mutableStateOf(false) }
 
-            // 自己負担額の入力
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(20.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("うち自己負担額", color = NotionTextPrimary, fontWeight = FontWeight.Medium)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("¥ ", color = NotionTextSecondary, fontSize = 16.sp)
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = selfBurdenText,
-                        onValueChange = { if (it.all { char -> char.isDigit() }) selfBurdenText = it },
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            color = NotionTextPrimary,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.End
-                        ),
-                        modifier = Modifier.width(100.dp),
-                        decorationBox = { innerTextField ->
-                            if (selfBurdenText.isEmpty()) {
-                                Text(amountText.ifEmpty { "0" }, color = NotionTextSecondary, textAlign = TextAlign.End)
+                AlertDialog(
+                    onDismissRequest = { showBackupPasswordDialog = false; backupPassword = "" },
+                    containerColor = Color.White,
+                    title = { Text("パスワード設定", color = Color.Black) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (backupMode == "export") {
+                                Text("復旧時に必要なパスワードを設定してください。忘れると復元できません。", fontSize = 12.sp, color = Color.Gray)
+                            } else {
+                                Text("バックアップ時に設定したパスワードを入力してください", fontSize = 12.sp, color = Color.Gray)
                             }
-                            innerTextField()
-                        }
-                    )
-                }
-            }
-
-            // 返済予定額の表示（自動計算結果）
-            if (reimbursement > 0) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFFF0F9F4)) // わずかに緑背景（返ってくるポジティブな色）
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("返済予定額（立替）", color = NotionSafeGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Text("¥ ${String.format("%,d", reimbursement)}", color = NotionSafeGreen, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp), thickness = 0.5.dp, color = NotionBorder)
-
-            // メモ
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text("品目・メモ", color = NotionTextPrimary, fontWeight = FontWeight.Medium)
-                Spacer(modifier = Modifier.height(8.dp))
-                androidx.compose.foundation.text.BasicTextField(
-                    value = memoText,
-                    onValueChange = { memoText = it },
-                    textStyle = androidx.compose.ui.text.TextStyle(color = NotionTextPrimary, fontSize = 15.sp),
-                    modifier = Modifier.fillMaxWidth(),
-                    decorationBox = { innerTextField ->
-                        if (memoText.isEmpty()) {
-                            Text("何にお金を使いましたか？", color = NotionTextSecondary, fontSize = 15.sp)
-                        }
-                        innerTextField()
-                    }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        Button(
-            onClick = { /* 記録確定ロジック */ },
-            modifier = Modifier.fillMaxWidth().height(60.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen, disabledContainerColor = NotionBorder),
-            shape = RoundedCornerShape(12.dp),
-            enabled = amountText.isNotEmpty() && selectedAsset != "未選択"
-        ) {
-            Text("記録を保存する", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        }
-
-        Spacer(modifier = Modifier.height(40.dp))
-    }
-
-    // --- 支払い元選択ボトムシート (以前のまま) ---
-    if (showAssetSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showAssetSheet = false },
-            containerColor = Color.White,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
-        ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
-                Text("支払い元を選択", modifier = Modifier.padding(16.dp), color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                assetOptions.forEach { asset ->
-                    AssetGroupItemRow(asset) { selectedAsset = asset; showAssetSheet = false }
-                }
-            }
-        }
-    }
-}
-
-// --- 3. 資産状況画面 ---
-
-@Composable
-fun AssetsScreen() {
-    val categories = remember {
-        mutableStateListOf(
-            AssetCategoryData(title = "現金", items = mutableStateListOf(AssetItemData(name = "現金", amount = 1500))),
-            AssetCategoryData(title = "銀行", items = mutableStateListOf(AssetItemData(name = "楽天銀行", amount = 515046))),
-            AssetCategoryData(title = "電子マネー", items = mutableStateListOf(AssetItemData(name = "PayPay", amount = 394)))
-        )
-    }
-
-    var showGroupSheet by remember { mutableStateOf(false) }
-    var showAddItemDialog by remember { mutableStateOf(false) }
-    var selectedGroupTitle by remember { mutableStateOf("") }
-    var editNameText by remember { mutableStateOf("") }
-    var editAmountText by remember { mutableStateOf("") }
-
-    var editingCategory by remember { mutableStateOf<AssetCategoryData?>(null) }
-    var editingItem by remember { mutableStateOf<Pair<AssetCategoryData, AssetItemData>?>(null) }
-    var itemToDelete by remember { mutableStateOf<Pair<AssetCategoryData, AssetItemData>?>(null) }
-    var categoryToDelete by remember { mutableStateOf<AssetCategoryData?>(null) }
-
-    val assetGroups = listOf("現金", "銀行", "電子マネー", "カード", "貯蓄", "投資", "カードローン", "ローン", "保険", "デビットカード", "その他")
-    val totalAssets = categories.sumOf { cat -> cat.items.sumOf { it.amount } }
-
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 24.dp).verticalScroll(rememberScrollState())) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("資産状況", color = NotionTextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            IconButton(
-                onClick = { showGroupSheet = true },
-                modifier = Modifier.background(NotionSafeGreen.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-            ) {
-                Icon(Icons.Default.Add, contentDescription = null, tint = NotionSafeGreen)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        Box(modifier = Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(12.dp)).border(1.dp, NotionBorder, RoundedCornerShape(12.dp)).padding(20.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                SummaryItemSmall("資産", totalAssets, Color(0xFF2196F3))
-                SummaryItemSmall("負債", 0, Color(0xFFE57373))
-                SummaryItemSmall("合計", totalAssets, NotionTextPrimary)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        categories.forEach { category ->
-            Column(modifier = Modifier.padding(bottom = 24.dp)) {
-                Text(
-                    text = category.title,
-                    color = NotionTextSecondary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.combinedClickable(
-                        onClick = { editingCategory = category; editNameText = category.title },
-                        onLongClick = { if (category.title != "カテゴリ未設定") categoryToDelete = category }
-                    ).padding(vertical = 4.dp, horizontal = 8.dp)
-                )
-                Box(modifier = Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(12.dp)).border(1.dp, NotionBorder, RoundedCornerShape(12.dp))) {
-                    Column {
-                        if (category.items.isEmpty()) {
-                            Text("項目がありません", modifier = Modifier.padding(16.dp).fillMaxWidth(), textAlign = TextAlign.Center, color = NotionTextSecondary, fontSize = 13.sp)
-                        }
-                        category.items.forEach { item ->
-                            AssetListItemRow(item, onClick = { editingItem = category to item; editNameText = item.name }, onLongClick = { itemToDelete = category to item })
-                        }
-                    }
-                }
-            }
-        }
-        Spacer(modifier = Modifier.height(40.dp))
-    }
-
-    if (showGroupSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showGroupSheet = false },
-            containerColor = Color.White,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
-        ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
-                Text("追加する資産カテゴリを選択", modifier = Modifier.padding(16.dp), color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                assetGroups.forEach { group ->
-                    AssetGroupItemRow(group) {
-                        selectedGroupTitle = group
-                        editNameText = ""
-                        editAmountText = ""
-                        showGroupSheet = false
-                        showAddItemDialog = true
-                    }
-                }
-            }
-        }
-    }
-
-    if (showAddItemDialog) {
-        AlertDialog(
-            onDismissRequest = { showAddItemDialog = false },
-            title = { Text("$selectedGroupTitle に追加", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    OutlinedTextField(value = editNameText, onValueChange = { editNameText = it }, label = { Text("名称（例: 楽天銀行）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Spacer(modifier = Modifier.height(16.dp))
-                    OutlinedTextField(value = editAmountText, onValueChange = { editAmountText = it }, label = { Text("金額") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val amount = editAmountText.toIntOrNull() ?: 0
-                    var targetCategory = categories.find { it.title == selectedGroupTitle }
-                    if (targetCategory == null) {
-                        targetCategory = AssetCategoryData(title = selectedGroupTitle, items = mutableStateListOf())
-                        categories.add(targetCategory)
-                    }
-                    targetCategory.items.add(AssetItemData(name = editNameText.ifBlank { "新規項目" }, amount = amount))
-                    showAddItemDialog = false
-                }) { Text("追加", color = NotionSafeGreen) }
-            },
-            dismissButton = { TextButton(onClick = { showAddItemDialog = false }) { Text("キャンセル") } },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(12.dp)
-        )
-    }
-
-    editingCategory?.let { category ->
-        NameEditDialog("カテゴリ名の変更", editNameText, onValueChange = { editNameText = it }, onDismiss = { editingCategory = null }) {
-            val index = categories.indexOf(category)
-            if (index != -1) categories[index] = category.copy(title = editNameText)
-            editingCategory = null
-        }
-    }
-    editingItem?.let { (category, item) ->
-        NameEditDialog("項目の名称変更", editNameText, onValueChange = { editNameText = it }, onDismiss = { editingItem = null }) {
-            val index = category.items.indexOf(item)
-            if (index != -1) category.items[index] = item.copy(name = editNameText)
-            editingItem = null
-        }
-    }
-    itemToDelete?.let { (category, item) ->
-        DeleteConfirmDialog("${item.name} を削除しますか？", onDismiss = { itemToDelete = null }) {
-            category.items.remove(item)
-            itemToDelete = null
-        }
-    }
-}
-
-// --- 4. AI相談画面 ---
-
-@Composable
-fun ConsultationScreen() {
-    val messages = remember {
-        mutableStateListOf(
-            ChatMessage("1", "こんにちは！「覗き魔」AIコンシェルジュです。Gemma-4-E4Bがあなたの支出判定や未来設計をサポートします。レシート画像を送っていただければ内容の解析も可能です。", isUser = false)
-        )
-    }
-    var inputText by remember { mutableStateOf("") }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        Text("AI相談", modifier = Modifier.padding(24.dp), color = NotionTextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-
-        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-            messages.forEach { msg ->
-                ChatBubble(msg)
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-        }
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = Color.White,
-            tonalElevation = 2.dp,
-            border = androidx.compose.foundation.BorderStroke(1.dp, NotionBorder)
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).imePadding(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = { }) { Icon(Icons.Default.Add, contentDescription = null, tint = NotionTextSecondary) }
-                Box(
-                    modifier = Modifier.weight(1f).background(NotionBackground, RoundedCornerShape(20.dp)).padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    if (inputText.isEmpty()) {
-                        Text("相談内容を入力...", color = NotionTextSecondary, fontSize = 14.sp)
-                    }
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = {
-                        if (inputText.isNotBlank()) {
-                            messages.add(ChatMessage(text = inputText, isUser = true))
-                            inputText = ""
-                            messages.add(ChatMessage("ai_reply", "ご相談ありがとうございます。その支出は「自己研鑽」のスコアが高そうですね！", isUser = false))
+                            OutlinedTextField(
+                                value = passwordText,
+                                onValueChange = { passwordText = it },
+                                visualTransformation = if (isPasswordVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                                        Icon(imageVector = if (isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = null, tint = Color.Gray)
+                                    }
+                                },
+                                singleLine = true,
+                                label = { Text("パスワード") },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NotionSafeGreen,
+                                    unfocusedBorderColor = Color.LightGray,
+                                    focusedLabelColor = NotionSafeGreen,
+                                    unfocusedLabelColor = Color.Gray,
+                                    cursorColor = NotionSafeGreen,
+                                    focusedTextColor = Color.Black,
+                                    unfocusedTextColor = Color.Black
+                                ),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, imeAction = if (backupMode == "export") androidx.compose.ui.text.input.ImeAction.Next else androidx.compose.ui.text.input.ImeAction.Done),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            if (backupMode == "export") {
+                                OutlinedTextField(
+                                    value = confirmPasswordText,
+                                    onValueChange = { confirmPasswordText = it },
+                                    visualTransformation = if (isPasswordVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                    singleLine = true,
+                                    label = { Text("パスワード（確認）") },
+                                    isError = confirmPasswordText.isNotEmpty() && passwordText != confirmPasswordText,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = NotionSafeGreen,
+                                        unfocusedBorderColor = Color.LightGray,
+                                        focusedLabelColor = NotionSafeGreen,
+                                        unfocusedLabelColor = Color.Gray,
+                                        cursorColor = NotionSafeGreen,
+                                        focusedTextColor = Color.Black,
+                                        unfocusedTextColor = Color.Black,
+                                        errorBorderColor = Color.Red,
+                                        errorLabelColor = Color.Red
+                                    ),
+                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                                    TextButton(
+                                        onClick = { 
+                                            val p = generateSecurePassword()
+                                            passwordText = p
+                                            confirmPasswordText = p
+                                            isPasswordVisible = true
+                                        },
+                                        colors = ButtonDefaults.textButtonColors(contentColor = NotionSafeGreen)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("安全なパスワードを生成")
+                                    }
+                                }
+                            }
                         }
                     },
-                    modifier = Modifier.background(if (inputText.isNotBlank()) NotionSafeGreen else NotionBorder, RoundedCornerShape(50.dp)).size(36.dp)
-                ) {
-                    Icon(Icons.Default.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    confirmButton = {
+                        val isEnabled = if (backupMode == "export") {
+                            passwordText.length >= 8 && passwordText == confirmPasswordText
+                        } else {
+                            passwordText.length >= 8
+                        }
+                        TextButton(
+                            enabled = isEnabled,
+                            onClick = {
+                                if (backupMode != "export") autofillManager?.commit()
+                                backupPassword = passwordText
+                                showBackupPasswordDialog = false
+                                if (backupMode == "export") {
+                                    exportLauncher.launch("nozokima-${SimpleDateFormat("yyyyMMdd", Locale.JAPAN).format(Date())}.zip")
+                                } else {
+                                    scope.launch {
+                                        try {
+                                            val uri = pendingImportUri ?: return@launch
+                                            contentResolver.openInputStream(uri)?.use { input ->
+                                                BackupManager(dao, applicationContext).importData(input, backupPassword)
+                                                snackbarHostState.showSnackbar("データをインポートしました")
+                                            }
+                                        } catch (e: Exception) {
+                                            snackbarHostState.showSnackbar("インポートに失敗しました: ${e.message}")
+                                        } finally {
+                                            backupPassword = ""
+                                            pendingImportUri = null
+                                        }
+                                    }
+                                }
+                            }
+                        ) { Text("OK") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showBackupPasswordDialog = false; backupPassword = ""; pendingImportUri = null }) { Text("キャンセル") }
+                    }
+                )
+            }
+
+            androidx.activity.compose.BackHandler(enabled = selectedTab != 0) {
+                selectedTab = when (selectedTab) {
+                    5 -> 0 // Goals -> Home
+                    6 -> 4 // CategoryManagement -> Settings
+                    else -> 0
                 }
             }
-        }
-    }
-}
 
-@Composable
-fun ChatBubble(message: ChatMessage) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Top
-    ) {
-        if (!message.isUser) {
-            Box(
-                modifier = Modifier.size(36.dp).clip(CircleShape).background(Color.White).border(1.dp, NotionBorder, CircleShape).padding(4.dp),
-                contentAlignment = Alignment.Center
+            val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        focusManager.clearFocus()
+                    },
+                color = MaterialTheme.colorScheme.background
             ) {
-                Image(painter = painterResource(id = R.drawable.nozokima), contentDescription = null, modifier = Modifier.size(24.dp))
+                if (isLoading) {
+                    // 読み込み中（一瞬のチラつき防止）
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        // 必要に応じてロゴなどを配置
+                    }
+                } else if (!isSetupCompleted) {
+                    SetupWizardScreen(dao = dao, onComplete = { /* UI will refresh */ })
+                } else if (showLockScreen) {
+                    AppLockScreen(
+                        correctPassword = appSettings.appLockPassword ?: "",
+                        onUnlock = { isAppLocked.value = false },
+                        failedAttempts = appSettings.failedAttempts,
+                        lockoutUntil = appSettings.lockoutUntil,
+                        onFailedAttempt = { attempts, until ->
+                            scope.launch {
+                                dao.upsertAppSettings(appSettings.copy(failedAttempts = attempts, lockoutUntil = until))
+                            }
+                        },
+                        onSuccessfulUnlock = {
+                            scope.launch {
+                                dao.upsertAppSettings(appSettings.copy(failedAttempts = 0, lockoutUntil = 0L))
+                            }
+                        },
+                        isBiometricEnabled = appSettings.isBiometricEnabled,
+                        onBiometricClick = {
+                            showBiometricPrompt(
+                                onSuccess = {
+                                    scope.launch {
+                                        dao.upsertAppSettings(appSettings.copy(failedAttempts = 0, lockoutUntil = 0L))
+                                    }
+                                    isAppLocked.value = false
+                                }
+                            )
+                        }
+                    )
+                } else {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Scaffold(
+                            containerColor = MaterialTheme.colorScheme.background,
+                            contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
+                        ) { innerPadding ->
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                AnimatedContent(
+                                    targetState = selectedTab,
+                                    transitionSpec = {
+                                        if (targetState > initialState) {
+                                            (slideInHorizontally { it } + fadeIn()).togetherWith(slideOutHorizontally { -it } + fadeOut())
+                                        } else {
+                                            (slideInHorizontally { -it } + fadeIn()).togetherWith(slideOutHorizontally { it } + fadeOut())
+                                        }.using(SizeTransform(clip = false))
+                                    },
+                                    label = "MainTabTransition"
+                                ) { targetTab ->
+                                    when (targetTab) {
+                                        0 -> Box(Modifier.padding(innerPadding)) {
+                                                            HomeScreen(
+                                                                viewModel = homeViewModel,
+                                                                dao = dao,
+                                                                onInputClick = { mode ->
+                                                                    initialInputMode = mode
+                                                                    selectedTab = 1
+                                                                },
+                                                                onConsultClick = { 
+                                                                    selectedTab = 3 
+                                                                },
+                                                                onAiAdviceClick = { advice ->
+                                                                    initialHomeAdviceText = advice
+                                                                    selectedTab = 3
+                                                                },
+                                                                onAssetsClick = { isScheduled ->
+                                                                    initialHistoryMode = isScheduled
+                                                                    initialScheduledMode = isScheduled
+                                                                    selectedTab = 2 
+                                                                },
+                                                                onHistoryClick = {
+                                                                    initialHistoryMode = true
+                                                                    initialScheduledMode = false
+                                                                    selectedTab = 2
+                                                                },
+                                                                onGoalsClick = {
+                                                                    selectedTab = 5
+                                                                },
+                                                                onSettingsClick = { selectedTab = 4 }
+                                                            )
+                                                        }
+                                                        1 -> Box(Modifier.padding(innerPadding)) {
+                                                            InputScreen(
+                                                                dao = dao, gemini = gemini, ocrManager = ocrManager,
+                                                                initialRecovery = recoveryLending,
+                                                                initialMode = initialInputMode,
+                                                                onRecoveryHandled = { 
+                                                                    recoveryLending = null
+                                                                    initialInputMode = null
+                                                                },
+                                                                onExternalActivityLaunch = { isExternalActivityLaunching.value = true },
+                                                                onBack = { selectedTab = 0 }
+                                                            )
+                                                        }
+                                                        2 -> Box(Modifier.padding(innerPadding)) {
+                                                            AssetsScreen(
+                                                                dao = dao,
+                                                                initialHistoryMode = initialHistoryMode,
+                                                                initialScheduledMode = initialScheduledMode,
+                                                                onBack = { 
+                                                                    initialHistoryMode = false
+                                                                    initialScheduledMode = false
+                                                                    selectedTab = 0 
+                                                                }
+                                                            )
+                                                        }
+                                                        3 -> {
+                                                            val drawerWidth = 280.dp
+                                                            val drawerWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { drawerWidth.toPx() }
+                                                            val drawerExpanded by animateFloatAsState(
+                                                                targetValue = if (drawerState.isOpen) 1f else 0f,
+                                                                label = "DrawerAnimation"
+                                                            )
+
+                                                            Box(modifier = Modifier.fillMaxSize()) {
+                                                                // メインコンテンツ (ConsultationScreen) を左に押し出す
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .fillMaxSize()
+                                                                        .offset { IntOffset(x = (-drawerWidthPx * drawerExpanded).toInt(), y = 0) }
+                                                                ) {
+                                                                    ConsultationScreen(
+                                                                        dao = dao, gemini = gemini,
+                                                                        ocrManager = ocrManager,
+                                                                        assets = homeViewModel.uiState.collectAsState().value.assets,
+                                                                        lendings = homeViewModel.uiState.collectAsState().value.lendings,
+                                                                        transactions = homeViewModel.uiState.collectAsState().value.transactions,
+                                                                        chatSessions = mainUiState.chatSessions,
+                                                                        drawerState = drawerState,
+                                                                        currentSessionId = currentChatSessionId,
+                                                                        onSessionSelected = { currentChatSessionId = it },
+                                                                        initialHomeAdviceText = initialHomeAdviceText,
+                                                                        onClearHomeAdvice = { initialHomeAdviceText = null },
+                                                                        onBack = { selectedTab = 0 },
+                                                                        modifier = Modifier.fillMaxSize()
+                                                                    )
+                                                                }
+
+                                                                // 右側からスライドインするドロワー
+                                                                if (drawerExpanded > 0f) {
+                                                                    // 背景の薄暗い部分（スクリム）
+                                                                    Box(
+                                                                        modifier = Modifier
+                                                                            .fillMaxSize()
+                                                                            .background(Color.Black.copy(alpha = 0.3f * drawerExpanded))
+                                                                            .clickable(
+                                                                                interactionSource = remember { MutableInteractionSource() },
+                                                                                indication = null
+                                                                            ) {
+                                                                                scope.launch { drawerState.close() }
+                                                                            }
+                                                                    )
+
+                                                                    Box(
+                                                                        modifier = Modifier
+                                                                            .width(drawerWidth)
+                                                                            .fillMaxHeight()
+                                                                            .align(Alignment.CenterEnd)
+                                                                            .offset { IntOffset(x = (drawerWidthPx * (1f - drawerExpanded)).toInt(), y = 0) }
+                                                                            .background(Color(0xFFF5F5F5))
+                                                                    ) {
+                                                                        ChatHistoryDrawerContent(
+                                                                            chatSessions = mainUiState.chatSessions,
+                                                                            currentSessionId = currentChatSessionId,
+                                                                            onSessionSelected = { currentChatSessionId = it },
+                                                                            onDeleteSession = { sessionId ->
+                                                                                scope.launch {
+                                                                                    dao.deleteChatSession(sessionId)
+                                                                                    dao.deleteMessagesForSession(sessionId)
+                                                                                    if (currentChatSessionId == sessionId) currentChatSessionId = null
+                                                                                }
+                                                                            },
+                                                                            drawerState = drawerState,
+                                                                            scope = scope
+                                                                        )
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        4 -> Box(Modifier.padding(innerPadding)) {
+                                                            GeneralSettingsScreen(
+                                                                appLockEnabled = appSettings.isAppLockEnabled,
+                                                                onToggleAppLock = { enabled ->
+                                                                    appLockDialogMode = if (enabled) "set" else "disable"
+                                                                    showAppLockPasswordDialog = true
+                                                                },
+                                                                biometricEnabled = appSettings.isBiometricEnabled,
+                                                                onToggleBiometric = { enabled ->
+                                                                    scope.launch {
+                                                                        dao.upsertAppSettings(appSettings.copy(isBiometricEnabled = enabled))
+                                                                    }
+                                                                },
+                                                                isBiometricAvailable = isBiometricAvailable(),
+                                                                onChangePassword = {
+                                                                    appLockDialogMode = "change"
+                                                                    showAppLockPasswordDialog = true
+                                                                },
+                                                                onExportClick = {
+                                                                    backupMode = "export"
+                                                                    showBackupPasswordDialog = true
+                                                                },
+                                                                onImportClick = { importLauncher.launch(arrayOf("*/*")) },
+                                                                onCategoryManagementClick = { selectedTab = 6 },
+                                                                themeMode = themeMode,
+                                                                onThemeModeChange = { newMode ->
+                                                                    scope.launch {
+                                                                        dao.upsertAppSettings(appSettings.copy(themeMode = newMode))
+                                                                    }
+                                                                },
+                                                                onBack = { selectedTab = 0 }
+                                                            )
+                                                        }
+                                                        5 -> Box(Modifier.padding(innerPadding)) {
+                                                            GoalsScreen(
+                                                                viewModel = homeViewModel,
+                                                                dao = dao,
+                                                                onBack = { 
+                                                                    selectedTab = 0 
+                                                                }
+                                                            )
+                                                        }
+                                                        6 -> Box(Modifier.padding(innerPadding)) {
+                                                            CategoryManagementScreen(dao = dao, onBack = { selectedTab = 4 })
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            
+                                            SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
+                                        }
+                                    }
+                }
             }
-            Spacer(modifier = Modifier.width(12.dp))
-        }
-
-        val bubbleColor = if (message.isUser) NotionSafeGreen else Color.White
-        val textColor = if (message.isUser) Color.White else NotionTextPrimary
-        val shape = if (message.isUser) RoundedCornerShape(16.dp, 16.dp, 2.dp, 16.dp) else RoundedCornerShape(16.dp, 16.dp, 16.dp, 2.dp)
-
-        Column(
-            modifier = Modifier.widthIn(max = 260.dp).background(bubbleColor, shape).border(1.dp, if (message.isUser) Color.Transparent else NotionBorder, shape).padding(12.dp)
-        ) {
-            if (message.imageUri != null) {
-                Text("[添付画像]", color = textColor, fontSize = 12.sp)
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-            Text(text = message.text, color = textColor, fontSize = 15.sp, lineHeight = 20.sp)
+            } // End of NozokimaTheme
         }
     }
-}
-
-// --- 共通コンポーネント ---
-
-@Composable
-fun AssetGroupItemRow(name: String, onClick: () -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().clickable { onClick() }) {
-        Text(text = name, modifier = Modifier.padding(16.dp).fillMaxWidth(), color = NotionTextPrimary, fontSize = 16.sp)
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = NotionBorder)
-    }
-}
-
-@Composable
-fun SummaryItemSmall(label: String, amount: Int, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = NotionTextSecondary, fontSize = 12.sp)
-        Text("¥ ${String.format("%,d", amount)}", color = color, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-fun AssetListItemRow(item: AssetItemData, onClick: () -> Unit, onLongClick: () -> Unit) {
-    Column {
-        Row(modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(item.name, modifier = Modifier.weight(1f), color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(text = "¥ ${String.format("%,d", item.amount)}", color = if (item.amount > 0) Color(0xFF2196F3) else NotionTextSecondary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-        }
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = NotionBorder)
-    }
-}
-
-@Composable
-fun NameEditDialog(title: String, value: String, onValueChange: (String) -> Unit, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold) }, text = { OutlinedTextField(value = value, onValueChange = onValueChange, singleLine = true, modifier = Modifier.fillMaxWidth()) }, confirmButton = { TextButton(onClick = onConfirm) { Text("保存", color = NotionSafeGreen) } }, dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル", color = NotionTextSecondary) } }, containerColor = Color.White, shape = RoundedCornerShape(12.dp))
-}
-
-@Composable
-fun DeleteConfirmDialog(text: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("確認", fontSize = 18.sp, fontWeight = FontWeight.Bold) }, text = { Text(text) }, confirmButton = { TextButton(onClick = onConfirm) { Text("削除", color = Color(0xFFE57373)) } }, dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル", color = NotionTextSecondary) } }, containerColor = Color.White, shape = RoundedCornerShape(12.dp))
 }
