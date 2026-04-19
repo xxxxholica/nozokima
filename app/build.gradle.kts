@@ -38,7 +38,9 @@ android {
     buildFeatures {
         compose = true
     }
+    // assetsに巨大ファイルを置かないため、noCompressの設定は不要になりました
 }
+
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
@@ -56,4 +58,7 @@ dependencies {
     kapt("androidx.room:room-compiler:$roomVersion")
 
     implementation("net.objecthunter:exp4j:0.4.8")
+
+    // MediaPipe LLM Inference
+    implementation("com.google.mediapipe:tasks-genai:0.10.33")
 }

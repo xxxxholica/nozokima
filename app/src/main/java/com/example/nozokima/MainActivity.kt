@@ -93,6 +93,7 @@ data class ChatMessage(
 
 class MainActivity : ComponentActivity() {
     private val db by lazy { (application as NozokimaApplication).database }
+    private val gemma by lazy { GemmaModel(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -143,7 +144,8 @@ class MainActivity : ComponentActivity() {
                             3 -> ConsultationScreen(
                                 messages = chatMessages,
                                 initialTransaction = consultingTransaction,
-                                onClearConsultation = { consultingTransaction = null }
+                                onClearConsultation = { consultingTransaction = null },
+                                gemma = gemma
                             )
                             4 -> BudgetSettingsScreen(dao)
                         }
@@ -1278,10 +1280,16 @@ fun AssetsScreen(dao: FinanceDao) {
 fun ConsultationScreen(
     messages: SnapshotStateList<ChatMessage>,
     initialTransaction: Transaction? = null,
-    onClearConsultation: () -> Unit = {}
+    onClearConsultation: () -> Unit = {},
+    gemma: GemmaModel? = null
 ) {
     var inputText by remember { mutableStateOf("") }
-    
+    val scope = rememberCoroutineScope()
+
+    // --- 準備状態と進捗を取得 ---
+    val isReady by (gemma?.isReady?.collectAsState() ?: remember { mutableStateOf(false) })
+    val progress by (gemma?.copyProgress?.collectAsState() ?: remember { mutableIntStateOf(0) })
+
     // 初期相談データの処理
     LaunchedEffect(initialTransaction) {
         if (initialTransaction != null) {
@@ -1296,17 +1304,47 @@ fun ConsultationScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Text("AI相談", modifier = Modifier.padding(top = 24.dp, start = 24.dp, end = 24.dp, bottom = 12.dp), color = NotionTextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "AI相談",
+            modifier = Modifier.padding(top = 24.dp, start = 24.dp, end = 24.dp, bottom = 12.dp),
+            color = NotionTextPrimary,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        // --- モデルの準備（ダウンロード）状況を表示 ---
+        if (!isReady) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                color = NotionBackground,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, NotionBorder)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(
+                        progress = { progress / 100f },
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = NotionSafeGreen
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("AIモデルを準備中... $progress%", fontSize = 12.sp, color = NotionTextSecondary)
+                }
+            }
+        }
 
         val listState = rememberLazyListState()
-        
-        // メッセージが追加されたら最新へスクロール
+
         LaunchedEffect(messages.size) {
             if (messages.isNotEmpty()) {
                 listState.animateScrollToItem(messages.size - 1)
             }
         }
 
+        // チャット履歴
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
@@ -1318,21 +1356,26 @@ fun ConsultationScreen(
             }
         }
 
+        // 入力フォーム
         Surface(
             modifier = Modifier.fillMaxWidth().imePadding(),
             color = Color.White,
             tonalElevation = 2.dp,
-            border = androidx.compose.foundation.BorderStroke(1.dp, NotionBorder)
+            border = BorderStroke(1.dp, NotionBorder)
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = { /* レシート撮影ロジック */ }) {
-                    Icon(Icons.Default.AddCircle, contentDescription = "レシート撮影", tint = NotionSafeGreen) 
+                    Icon(Icons.Default.AddCircle, contentDescription = "レシート撮影", tint = NotionSafeGreen)
                 }
                 Box(
-                    modifier = Modifier.weight(1f).background(NotionBackground, RoundedCornerShape(20.dp)).border(1.dp, NotionBorder, RoundedCornerShape(20.dp)).padding(horizontal = 16.dp, vertical = 10.dp)
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(NotionBackground, RoundedCornerShape(20.dp))
+                        .border(1.dp, NotionBorder, RoundedCornerShape(20.dp))
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
                     if (inputText.isEmpty()) {
                         Text("相談内容を入力...", color = NotionTextSecondary, fontSize = 14.sp)
@@ -1344,17 +1387,32 @@ fun ConsultationScreen(
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
+
+                // 送信ボタン
                 IconButton(
                     onClick = {
-                        if (inputText.isNotBlank()) {
-                            messages.add(ChatMessage(text = inputText, isUser = true))
+                        if (inputText.isNotBlank() && gemma != null) {
                             val userMsg = inputText
+                            messages.add(ChatMessage(text = userMsg, isUser = true))
                             inputText = ""
-                            // モック返信
-                            messages.add(ChatMessage("ai_reply_${System.currentTimeMillis()}", "なるほど、${userMsg.take(5)}...についての相談ですね。あなたの資産推移から見ると、今の判断は非常に賢明だと思います！", isUser = false))
+
+                            scope.launch {
+                                val aiMsgId = "ai_reply_${System.currentTimeMillis()}"
+                                messages.add(ChatMessage(id = aiMsgId, text = "...", isUser = false))
+
+                                // ここで gemma を参照
+                                val response = gemma.generateResponse(userMsg)
+
+                                val index = messages.indexOfFirst { it.id == aiMsgId }
+                                if (index != -1) {
+                                    messages[index] = ChatMessage(id = aiMsgId, text = response, isUser = false)
+                                }
+                            }
                         }
                     },
-                    modifier = Modifier.background(if (inputText.isNotBlank()) NotionSafeGreen else NotionBorder, RoundedCornerShape(50.dp)).size(36.dp)
+                    modifier = Modifier
+                        .background(if (inputText.isNotBlank()) NotionSafeGreen else NotionBorder, RoundedCornerShape(50.dp))
+                        .size(36.dp)
                 ) {
                     Icon(Icons.Default.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                 }
