@@ -1,0 +1,50 @@
+package com.example.nozokima
+
+import androidx.room.Dao
+import androidx.room.Delete
+import androidx.room.Insert
+import androidx.room.Query
+import androidx.room.Update
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface FinanceDao {
+    @Query("SELECT * FROM transactions ORDER BY date DESC")
+    fun getAllTransactions(): Flow<List<TransactionEntity>>
+
+    @Insert
+    suspend fun insertTransaction(transaction: TransactionEntity)
+
+    @Query("SELECT * FROM assets")
+    fun getAllAssets(): Flow<List<AssetEntity>>
+
+    @Insert
+    suspend fun insertAsset(asset: AssetEntity)
+
+    @Update
+    suspend fun updateAsset(asset: AssetEntity)
+
+    @Query("SELECT * FROM budgets")
+    fun getAllBudgets(): Flow<List<BudgetEntity>>
+
+    @Insert
+    suspend fun insertBudget(budget: BudgetEntity)
+
+    @Update
+    suspend fun updateBudget(budget: BudgetEntity)
+
+    @Delete
+    suspend fun deleteAsset(asset: AssetEntity)
+
+    @Query("DELETE FROM assets WHERE category = :category")
+    suspend fun deleteAssetsByCategory(category: String)
+
+    @Query("UPDATE assets SET category = :newCategory WHERE category = :oldCategory")
+    suspend fun updateCategoryName(oldCategory: String, newCategory: String)
+
+    @Query("SELECT * FROM assets WHERE name = :assetName LIMIT 1")
+    suspend fun getAssetByName(assetName: String): AssetEntity?
+
+    @Delete
+    suspend fun deleteTransaction(transaction: TransactionEntity)
+}
