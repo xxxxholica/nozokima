@@ -1,8 +1,24 @@
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-    id("kotlin-kapt")
+    id("com.google.devtools.ksp")
+}
+
+val isWindows = System.getProperty("os.name").lowercase().contains("win")
+
+if (isWindows) {
+    val tmpDir = rootProject.layout.projectDirectory.dir(".gradle/tmp").asFile
+    try {
+        if (!tmpDir.exists()) tmpDir.mkdirs()
+        if (tmpDir.exists() && tmpDir.canWrite()) {
+            System.setProperty("java.io.tmpdir", tmpDir.absolutePath)
+            println("INFO: java.io.tmpdir set to ${tmpDir.absolutePath}")
+        }
+    } catch (e: Exception) {
+        println("WARNING: Failed to set custom java.io.tmpdir: ${e.message}")
+    }
 }
 
 android {
@@ -55,7 +71,7 @@ dependencies {
     val roomVersion = "2.6.1"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
-    kapt("androidx.room:room-compiler:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
 
     implementation("net.objecthunter:exp4j:0.4.8")
 

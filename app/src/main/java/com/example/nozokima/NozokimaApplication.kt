@@ -11,4 +11,6 @@ class NozokimaApplication : Application() {
             "nozokima-db"
         ).build()
     }
+
+    val gemmaModel by lazy { GemmaModel(this) }
 }
