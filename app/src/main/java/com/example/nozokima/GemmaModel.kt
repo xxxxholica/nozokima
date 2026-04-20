@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class GemmaModel(private val context: Context) {
     private var llmInference: LlmInference? = null
     private val downloadStarted = AtomicBoolean(false)
+    private val notificationHelper = DownloadNotificationHelper(context)
 
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
@@ -34,7 +35,12 @@ class GemmaModel(private val context: Context) {
     private val assetFileName = "gemma.litertlm"
     private val modelFile = File(context.filesDir, assetFileName)
     private val modelPath = modelFile.absolutePath
+    private val markerFile = File(context.filesDir, "gemma.litertlm.complete") // 完了マーカー
     private val downloadUrl = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm"
+
+    /** モデルが正常にダウンロード完了した状態かを確認 */
+    private fun isModelValid(): Boolean =
+        modelFile.exists() && markerFile.exists() && modelFile.length() > 100_000_000L // 100MB以上
 
     fun requestModelDownload() {
         if (!_isReady.value && !downloadStarted.get()) {
@@ -57,9 +63,18 @@ class GemmaModel(private val context: Context) {
         if (_isReady.value) return@withContext
 
         try {
-            if (!modelFile.exists() || modelFile.length() < 1_000_000) {
+            if (!isModelValid()) {
+                // 破損・不完全なファイルがあれば削除してリセット
+                if (modelFile.exists()) {
+                    modelFile.delete()
+                    Log.w("GemmaModel", "不完全なモデルファイルを削除しました")
+                }
+                markerFile.delete()
                 if (!downloadStarted.get()) {
                     _errorMessage.value = "モデルのダウンロードは未承認です。"
+                    // ダウンロード済みフラグをリセットして再ダウンロード可能にする
+                    downloadStarted.set(false)
+                    _needsDownloadPermission.value = true
                     return@withContext
                 }
                 downloadModelFromUrl()
@@ -75,7 +90,12 @@ class GemmaModel(private val context: Context) {
             _errorMessage.value = null
         } catch (e: Exception) {
             Log.e("GemmaModel", "初期化エラー", e)
-            _errorMessage.value = "モデルの準備に失敗しました: ${e.localizedMessage}"
+            // 初期化失敗 = モデルが壊れている可能性 → 削除して再ダウンロード可能にする
+            modelFile.delete()
+            markerFile.delete()
+            downloadStarted.set(false)
+            _errorMessage.value = "モデルの読み込みに失敗しました。再ダウンロードが必要です。"
+            _needsDownloadPermission.value = true
             _isReady.value = false
         }
     }
@@ -102,16 +122,22 @@ class GemmaModel(private val context: Context) {
                         output.write(buffer, 0, bytesRead)
                         downloadedSize += bytesRead
                         if (totalSize > 0) {
-                            val progress = (downloadedSize * 100 / totalSize).toInt()
-                            _copyProgress.value = progress.coerceIn(0, 100)
+                            val progress = (downloadedSize * 100 / totalSize).toInt().coerceIn(0, 100)
+                            _copyProgress.value = progress
+                            notificationHelper.showProgress(progress)
                         }
                     }
                     output.flush()
                 }
             }
+            notificationHelper.showComplete()
+            markerFile.createNewFile() // 正常完了マーカーを書き込む
         } catch (e: Exception) {
             Log.e("GemmaModel", "ダウンロード失敗", e)
             if (modelFile.exists()) modelFile.delete()
+            markerFile.delete()
+            notificationHelper.showError()
+            downloadStarted.set(false) // 再試行を許可
             _errorMessage.value = "ダウンロードに失敗しました。空き容量を確認してください。"
             throw e
         }

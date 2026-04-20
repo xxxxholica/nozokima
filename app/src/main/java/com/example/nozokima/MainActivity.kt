@@ -97,6 +97,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Android 13+ で通知権限をリクエスト
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 0)
+        }
+
         setContent {
             var selectedTab by remember { mutableIntStateOf(0) }
             var consultingTransaction by remember { mutableStateOf<Transaction?>(null) }
@@ -105,8 +111,42 @@ class MainActivity : ComponentActivity() {
                     ChatMessage("1", "こんにちは！「覗き魔」AIコンシェルジュです。Gemma-4-E4Bがあなたの支出判定や未来設計をサポートします。レシート画像を送っていただければ内容の解析も可能です。", isUser = false)
                 )
             }
-            
+
             val dao = db.financeDao()
+
+            // --- バックグラウンドダウンロード管理（タブ切替後も継続）---
+            val needsDownload by gemma.needsDownloadPermission.collectAsState()
+            val scope = rememberCoroutineScope()
+
+            // AI相談タブを開いたとき、未準備なら許可ダイアログをリクエスト
+            LaunchedEffect(selectedTab) {
+                if (selectedTab == 3) {
+                    gemma.requestModelDownload()
+                }
+            }
+
+            // ダウンロード許可ダイアログ（Activityレベル → タブ切替しても継続）
+            if (needsDownload) {
+                AlertDialog(
+                    onDismissRequest = { gemma.declineModelDownload() },
+                    title = { Text("追加のダウンロード") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("AI相談の利用にはAIモデルが必要です。\nダウンロードはWi-Fi 接続を推奨します。", fontSize = 14.sp)
+                            Spacer(Modifier.height(2.dp))
+                            Text("・Gemma-4-E4B-it（約5GB）", fontSize = 13.sp, color = NotionTextSecondary)
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            scope.launch { gemma.startDownloadIfPermitted() }
+                        }) { Text("ダウンロード開始") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { gemma.declineModelDownload() }) { Text("キャンセル") }
+                    }
+                )
+            }
 
             Surface(modifier = Modifier.fillMaxSize(), color = NotionBackground) {
                 Scaffold(
@@ -119,9 +159,9 @@ class MainActivity : ComponentActivity() {
                                     icon = { Icon(icons[index], contentDescription = item) },
                                     label = { Text(item, fontSize = 10.sp) },
                                     selected = selectedTab == index,
-                                    onClick = { 
-                                        if (index != 3) consultingTransaction = null 
-                                        selectedTab = index 
+                                    onClick = {
+                                        if (index != 3) consultingTransaction = null
+                                        selectedTab = index
                                     },
                                     colors = NavigationBarItemDefaults.colors(
                                         selectedIconColor = NotionSafeGreen,
@@ -1289,6 +1329,7 @@ fun ConsultationScreen(
     // --- 準備状態と進捗を取得 ---
     val isReady by (gemma?.isReady?.collectAsState() ?: remember { mutableStateOf(false) })
     val progress by (gemma?.copyProgress?.collectAsState() ?: remember { mutableIntStateOf(0) })
+    val errorMessage by (gemma?.errorMessage?.collectAsState() ?: remember { mutableStateOf<String?>(null) })
 
     // 初期相談データの処理
     LaunchedEffect(initialTransaction) {
@@ -1315,23 +1356,40 @@ fun ConsultationScreen(
         // --- モデルの準備（ダウンロード）状況を表示 ---
         if (!isReady) {
             Surface(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 color = NotionBackground,
                 shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NotionBorder)
             ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CircularProgressIndicator(
-                        progress = { progress / 100f },
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = NotionSafeGreen
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text("AIモデルを準備中... $progress%", fontSize = 12.sp, color = NotionTextSecondary)
+                Column(modifier = Modifier.padding(16.dp)) {
+                    if (errorMessage != null) {
+                        // エラー表示
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFE57373), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(errorMessage ?: "", fontSize = 12.sp, color = Color(0xFFE57373))
+                        }
+                    } else if (progress > 0) {
+                        // ダウンロード中
+                        Text("AIモデルをダウンロード中... $progress%", fontSize = 12.sp, color = NotionTextSecondary)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { progress / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = NotionSafeGreen
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("別のメニューに移動してもダウンロードは継続されます。", fontSize = 11.sp, color = NotionTextSecondary)
+                    } else {
+                        // 未開始（ダウンロード許可待ち）
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Info, contentDescription = null, tint = NotionTextSecondary, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("AIモデルのダウンロードが必要です。上のダイアログで「ダウンロード開始」を選択してください。", fontSize = 12.sp, color = NotionTextSecondary)
+                        }
+                    }
                 }
             }
         }
