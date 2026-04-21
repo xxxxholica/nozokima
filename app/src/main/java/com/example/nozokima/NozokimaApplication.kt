@@ -9,7 +9,7 @@ class NozokimaApplication : Application() {
             this,
             AppDatabase::class.java,
             "nozokima-db"
-        ).build()
+        ).fallbackToDestructiveMigration().build()
     }
 
     val gemmaModel by lazy { GemmaModel(this) }
