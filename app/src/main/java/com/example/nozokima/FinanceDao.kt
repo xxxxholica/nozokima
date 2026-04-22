@@ -49,6 +49,9 @@ interface FinanceDao {
     @Delete
     suspend fun deleteTransaction(transaction: TransactionEntity)
 
+    @Update
+    suspend fun updateTransaction(transaction: TransactionEntity)
+
     // 目標設定
     @Query("SELECT * FROM goal_settings WHERE id = 1 LIMIT 1")
     fun getGoalSetting(): Flow<GoalSettingEntity?>
