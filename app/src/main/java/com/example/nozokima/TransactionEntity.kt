@@ -10,5 +10,6 @@ data class TransactionEntity(
     val amount: Int,
     val category: String,
     val date: Long,
-    val assetName: String
+    val assetName: String,
+    val isExpense: Boolean = true
 )

@@ -226,8 +226,8 @@ fun HomeScreen(
         }
     }
 
-    val currentAssets = assets.sumOf { it.amount }.let { if (it == 0) 158000 else it }
-    
+    val currentAssets = assets.sumOf { it.amount }
+
     // 今月の支出を計算
     val calendar = Calendar.getInstance().apply {
         set(Calendar.DAY_OF_MONTH, 1)
@@ -239,7 +239,7 @@ fun HomeScreen(
     val startOfMonth = calendar.timeInMillis
     
     val spentThisMonth = transactions
-        .filter { it.date >= startOfMonth }
+        .filter { it.date >= startOfMonth && it.isExpense }
         .sumOf { it.amount }
 
     // 予算ゲージ用
@@ -258,9 +258,6 @@ fun HomeScreen(
 
     val defaultBudget = budgets.sumOf { it.monthlyAmount }.let { if (it == 0) 100000L else it.toLong() }
     val monthlyBudget = goalMonthlyBudget ?: defaultBudget
-    val remainingBudget = monthlyBudget - spentThisMonth
-    val remainingProgress = if (monthlyBudget > 0) (remainingBudget.toFloat() / monthlyBudget.toFloat()).coerceIn(0f, 1f) else 0f
-
     val daysUntilReset = calendar.getActualMaximum(Calendar.DAY_OF_MONTH) - Calendar.getInstance().get(Calendar.DAY_OF_MONTH)
 
     Column(
@@ -335,14 +332,16 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // 予算進捗を強調
+                // 予算進捗を強調（使用率で色分け）
+                val spentRatio = if (monthlyBudget > 0) spentThisMonth.toFloat() / monthlyBudget.toFloat() else 0f
                 val progressColor = when {
-                    remainingProgress < 0.25f -> Color(0xFFE57373) // 赤
-                    remainingProgress < 0.5f -> Color(0xFFFFB74D)  // 黄色
+                    spentRatio > 0.75f -> Color(0xFFE57373) // 赤：75%超
+                    spentRatio > 0.5f -> Color(0xFFFFB74D)  // 黄：50%超
                     else -> NotionSafeGreen
                 }
                 
                 Column(modifier = Modifier.fillMaxWidth()) {
+                    // 上段：短期予算バー
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -350,28 +349,156 @@ fun HomeScreen(
                     ) {
                         Text("あといくら使える？", color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                         Text(
-                            text = "¥ ${String.format("%,d", remainingBudget)} / ¥ ${String.format("%,d", monthlyBudget)}",
+                            text = "¥ ${String.format(Locale.JAPAN, "%,d", spentThisMonth)} / ¥ ${String.format(Locale.JAPAN, "%,d", monthlyBudget)}",
                             color = NotionTextPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Spacer(modifier = Modifier.height(8.dp))
+                    // 予算バーは「使った割合」で左から伸びるカウントアップ表示
+                    val spentProgress = if (monthlyBudget > 0) (spentThisMonth.toFloat() / monthlyBudget.toFloat()).coerceIn(0f, 1f) else 0f
                     LinearProgressIndicator(
-                        progress = { remainingProgress },
+                        progress = { spentProgress },
                         modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)),
                         color = progressColor,
                         trackColor = NotionBorder,
                         strokeCap = StrokeCap.Round
                     )
+
+                    // 下段：長期目標バー（常に表示）
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    val goalForCard = goalSetting
+                    val hasGoal = goalForCard != null && goalForCard.targetAmount > 0
+                    val actualAssetsForGoal = assets.sumOf { it.amount }.toLong()
+                    val goalProgressRatio = if (hasGoal) (actualAssetsForGoal.toFloat() / goalForCard!!.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
+                    val goalDisplayTitle = when {
+                        !hasGoal -> "目標未設定"
+                        goalForCard!!.title.isNotEmpty() -> goalForCard.title
+                        else -> "目標の貯金"
+                    }
+                    val goalAmountText = if (hasGoal)
+                        "¥ ${String.format(Locale.JAPAN, "%,d", actualAssetsForGoal)} / ¥ ${String.format(Locale.JAPAN, "%,d", goalForCard!!.targetAmount)}"
+                    else "— 設定してください"
+                    val goalBarColor = if (hasGoal) Color(0xFF2196F3) else NotionBorder
+                    val goalTrackColor = NotionBorder
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = !hasGoal) { onNavigateToSettings() },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text(
+                            text = goalDisplayTitle,
+                            color = if (hasGoal) NotionTextSecondary else NotionTextSecondary.copy(alpha = 0.6f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = goalAmountText,
+                            color = if (hasGoal) NotionTextPrimary else NotionTextSecondary.copy(alpha = 0.5f),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { goalProgressRatio },
+                        modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)),
+                        color = goalBarColor,
+                        trackColor = goalTrackColor,
+                        strokeCap = StrokeCap.Round
+                    )
+
+                    // AIによる分析
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    val aiAnalysisText = run {
+                        val spentRatio = if (monthlyBudget > 0) spentThisMonth.toFloat() / monthlyBudget.toFloat() else 0f
+                        val goalRatio = goalProgressRatio
+                        when {
+                            spentRatio > 0.9f ->
+                                "今月の予算をほぼ使い切っています。残りの日数を考えると、支出を大幅に抑える必要があります。"
+                            spentRatio > 0.7f ->
+                                "今月の支出ペースはやや速めです。このまま続くと月末に予算を超える可能性があります。"
+                            spentRatio > 0.4f ->
+                                "支出ペースは概ね順調です。目標達成に向けて引き続き管理を続けましょう。"
+                            spentRatio > 0f ->
+                                "今月の支出は順調にコントロールできています。この調子を維持しましょう！"
+                            else ->
+                                "まだ今月の支出がありません。記録を始めて家計を把握しましょう。"
+                        } + if (hasGoal && goalRatio < 1f) {
+                            val pct = (goalRatio * 100).toInt()
+                            " 目標への達成率は ${pct}% です。"
+                        } else if (hasGoal && goalRatio >= 1f) {
+                            " 🎉 目標達成済みです！"
+                        } else ""
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFF5F5F5), RoundedCornerShape(10.dp))
+                            .padding(12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .background(NotionSafeGreen.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Face,
+                                    contentDescription = "AI",
+                                    tint = NotionSafeGreen,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "覗き魔 AI",
+                                    color = NotionSafeGreen,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = aiAnalysisText,
+                                    color = NotionTextSecondary,
+                                    fontSize = 12.sp,
+                                    lineHeight = 18.sp
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // 目標セクション（移動）
-        Text("目標", color = NotionTextSecondary, style = MaterialTheme.typography.titleSmall)
+        // カテゴリアイコンマップ（両セクションで共用）
+        val categoryIconMap = mapOf(
+            "食費" to Icons.Default.ShoppingCart,
+            "日用品" to Icons.Default.Build,
+            "交通費" to Icons.Default.Place,
+            "交際費" to Icons.Default.Favorite,
+            "娯楽" to Icons.Default.Star,
+            "美容" to Icons.Default.Face,
+            "健康" to Icons.Default.Info,
+            "その他" to Icons.Default.MoreHoriz,
+            "給与" to Icons.Default.AccountBalance,
+            "賞与" to Icons.Default.Star,
+            "副業" to Icons.Default.Build,
+            "お小遣い" to Icons.Default.Favorite,
+            "還付金" to Icons.Default.Info
+        )
+
+        // 最近の支出（支出・収入両方、最新5件）
+        Text("最近の記録", color = NotionTextSecondary, style = MaterialTheme.typography.titleSmall)
         Spacer(modifier = Modifier.height(12.dp))
 
         Box(
@@ -379,63 +506,82 @@ fun HomeScreen(
                 .fillMaxWidth()
                 .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
                 .background(Color.White, RoundedCornerShape(12.dp))
-                .clickable { onNavigateToSettings() }
-                .padding(24.dp)
         ) {
-            val currentGoal = goalSetting
-            if (currentGoal != null && currentGoal.targetAmount > 0) {
-                // 目標が設定されている場合
-                val gap = currentGoal.targetAmount - currentAssets
-                val progressRatio = if (currentGoal.targetAmount > 0) (currentAssets.toFloat() / currentGoal.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
-                val remainingDaysForGoal = ((currentGoal.targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
-
-                // 最短達成日の計算（月収から簡易的な加速を計算）
-                val maxMonthlySavings = (currentGoal.monthlyIncome * 0.7).toLong()
-                val fastestMonths = if (maxMonthlySavings > 0 && gap > 0) (gap.toDouble() / maxMonthlySavings).coerceAtLeast(0.0) else 0.0
-                val fastestDateMillis = System.currentTimeMillis() + (fastestMonths * 30 * 24 * 60 * 60 * 1000L).toLong()
-                val fastestDaysForGoal = if (gap <= 0) 0L else ((fastestDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
-                val accelerationDays = remainingDaysForGoal - fastestDaysForGoal
-                val accelerationText = if (accelerationDays > 0) "+ $accelerationDays 日" else "順調"
-
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                        val displayTitle = if (currentGoal.title.isNotEmpty()) currentGoal.title else "目標の貯金"
-                        Text(text = displayTitle, color = NotionTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        Text(text = "達成率 ${if (progressRatio.isNaN()) 0 else (progressRatio * 100).toInt()}%", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    LinearProgressIndicator(
-                        progress = { if (progressRatio.isNaN()) 0f else progressRatio },
-                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                        color = Color(0xFF2196F3),
-                        trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
-                        strokeCap = StrokeCap.Round
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("加速", color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Surface(color = NotionSafeGreen.copy(alpha = 0.1f), shape = RoundedCornerShape(12.dp)) {
-                                Text(text = accelerationText, color = NotionSafeGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-                            }
-                        }
-                        Text(text = "残り ${remainingDaysForGoal} 日", color = NotionTextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    }
+            if (transactions.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("記録がまだありません", color = NotionTextSecondary, fontSize = 14.sp, textAlign = TextAlign.Center)
                 }
             } else {
-                // 目標未設定の場合のフォールバック
-                Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFFFD54F), modifier = Modifier.size(32.dp))
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("目標を設定して、貯金を加速させよう！", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(
-                        onClick = onNavigateToSettings,
-                        colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("目標を設定する", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                Column {
+                    transactions.take(5).forEachIndexed { index, entity ->
+                        val tx = Transaction(
+                            id = entity.id,
+                            name = entity.name,
+                            amount = entity.amount,
+                            category = entity.category,
+                            date = entity.date
+                        )
+                        val isExpenseTx = entity.isExpense
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .background(
+                                            if (isExpenseTx) Color(0xFFFFEBEE) else NotionSafeGreen.copy(alpha = 0.08f),
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .border(1.dp, NotionBorder, RoundedCornerShape(10.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = categoryIconMap[tx.category] ?: Icons.Default.MoreHoriz,
+                                        contentDescription = tx.category,
+                                        tint = if (isExpenseTx) Color(0xFFE57373) else NotionSafeGreen,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(tx.name, color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                    Text(tx.category, color = NotionTextSecondary, fontSize = 12.sp)
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "¥ ${String.format(Locale.JAPAN, "%,d", tx.amount)}",
+                                    color = if (isExpenseTx) Color(0xFFE57373) else NotionSafeGreen,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                IconButton(
+                                    onClick = { if (isExpenseTx) onConsultClick(tx) },
+                                    modifier = Modifier.size(32.dp).background(NotionBackground, CircleShape),
+                                    enabled = isExpenseTx
+                                ) {
+                                    Icon(Icons.Default.Face, contentDescription = "AI相談",
+                                        tint = if (isExpenseTx) NotionSafeGreen else NotionTextSecondary.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                        if (index < minOf(transactions.size, 5) - 1) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(horizontal = 20.dp),
+                                thickness = 0.5.dp,
+                                color = NotionBorder
+                            )
+                        }
                     }
                 }
             }
@@ -444,75 +590,89 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(32.dp))
 
         Text("今月の統計", color = NotionTextSecondary, style = MaterialTheme.typography.titleSmall)
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // 支出内訳グラフ（ドーナツ型）
-        val categoryGroups = transactions.filter { it.date >= startOfMonth }
+        // 今月の支出をカテゴリ別に集計し、上位3件
+        val monthlyCategoryGroups = transactions
+            .filter { it.date >= startOfMonth && it.isExpense }
             .groupBy { it.category }
             .mapValues { it.value.sumOf { t -> t.amount } }
-        
-        val totalSpentForChart = categoryGroups.values.sum().toFloat()
-        val sortedCategories = categoryGroups.toList().sortedByDescending { it.second }.take(4)
-        val chartColors = listOf(NotionSafeGreen, Color(0xFF2196F3), Color(0xFFFFB74D), Color(0xFFE57373))
+            .toList()
+            .sortedByDescending { it.second }
+            .take(3)
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
                 .background(Color.White, RoundedCornerShape(12.dp))
-                .padding(20.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                DonutChart(
-                    data = if (totalSpentForChart > 0) sortedCategories.map { it.second / totalSpentForChart } else listOf(1f),
-                    colors = if (totalSpentForChart > 0) chartColors else listOf(NotionBorder),
-                    centerLabel = sortedCategories.firstOrNull()?.first ?: "なし",
-                    centerValue = if (totalSpentForChart > 0) "${((sortedCategories.firstOrNull()?.second ?: 0) / totalSpentForChart * 100).toInt()}%" else "0%",
-                    modifier = Modifier.size(100.dp)
-                )
-                Spacer(modifier = Modifier.width(24.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (totalSpentForChart > 0) {
-                        sortedCategories.forEachIndexed { index, (cat, amt) ->
-                            ChartLegend(cat, "${(amt / totalSpentForChart * 100).toInt()}%", chartColors[index % chartColors.size])
+            if (monthlyCategoryGroups.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("今月の支出はまだありません", color = NotionTextSecondary, fontSize = 14.sp, textAlign = TextAlign.Center)
+                }
+            } else {
+                Column {
+                    monthlyCategoryGroups.forEachIndexed { index, (category, amount) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { /* 将来的に統計詳細タブへ遷移 */ }
+                                .padding(horizontal = 20.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .background(Color.White, RoundedCornerShape(10.dp))
+                                        .border(1.dp, NotionBorder, RoundedCornerShape(10.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = categoryIconMap[category] ?: Icons.Default.MoreHoriz,
+                                        contentDescription = category,
+                                        tint = NotionTextSecondary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = category,
+                                    color = NotionTextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "¥ ${String.format(Locale.JAPAN, "%,d", amount)}",
+                                    color = NotionTextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = NotionTextSecondary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
-                    } else {
-                        Text("データなし", color = NotionTextSecondary, fontSize = 12.sp)
+                        if (index < monthlyCategoryGroups.lastIndex) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(horizontal = 20.dp),
+                                thickness = 0.5.dp,
+                                color = NotionBorder
+                            )
+                        }
                     }
                 }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            val maxTransaction = transactions.filter { it.date >= startOfMonth }.maxByOrNull { it.amount }
-            SummaryCard(title = "合計の支出", value = "¥ ${String.format("%,d", spentThisMonth)}", comparison = null, modifier = Modifier.weight(1f).fillMaxHeight())
-            SummaryCard(title = "最大の出費", value = "¥ ${String.format("%,d", maxTransaction?.amount ?: 0)}", subValue = maxTransaction?.name ?: "なし", comparison = null, modifier = Modifier.weight(1f).fillMaxHeight())
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // 最近の支出
-        Text("最近の支出", color = NotionTextSecondary, style = MaterialTheme.typography.titleSmall)
-        Spacer(modifier = Modifier.height(12.dp))
-        
-        if (transactions.isEmpty()) {
-            Text("支出の記録がまだありません", color = NotionTextSecondary, fontSize = 14.sp, modifier = Modifier.padding(vertical = 16.dp))
-        } else {
-            transactions.take(5).forEach { entity ->
-                val tx = Transaction(
-                    id = entity.id,
-                    name = entity.name,
-                    amount = entity.amount,
-                    category = entity.category,
-                    date = entity.date
-                )
-                TransactionRow(tx, onConsultClick)
-                Spacer(modifier = Modifier.height(8.dp))
             }
         }
 
@@ -520,95 +680,13 @@ fun HomeScreen(
     }
 }
 
-@Composable
-fun TransactionRow(tx: Transaction, onConsultClick: (Transaction) -> Unit) {
-    Surface(
-        color = Color.White,
-        shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, NotionBorder),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(tx.name, color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                Text(tx.category, color = NotionTextSecondary, fontSize = 12.sp)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("¥ ${String.format("%,d", tx.amount)}", color = NotionTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.width(12.dp))
-                IconButton(onClick = { onConsultClick(tx) }, modifier = Modifier.size(32.dp).background(NotionBackground, CircleShape)) {
-                    Icon(Icons.Default.Face, contentDescription = "AI相談", tint = NotionSafeGreen, modifier = Modifier.size(18.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun DonutChart(data: List<Float>, colors: List<Color>, centerLabel: String = "", centerValue: String = "", modifier: Modifier = Modifier) {
-    Box(contentAlignment = Alignment.Center, modifier = modifier) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            var startAngle = -90f
-            data.forEachIndexed { index, value ->
-                val sweepAngle = value * 360f
-                drawArc(
-                    color = colors[index],
-                    startAngle = startAngle,
-                    sweepAngle = sweepAngle,
-                    useCenter = false,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 24f, cap = StrokeCap.Round)
-                )
-                startAngle += sweepAngle
-            }
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(text = centerLabel, color = NotionTextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-            Text(text = centerValue, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-@Composable
-fun ChartLegend(label: String, percent: String, color: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(modifier = Modifier.size(8.dp).background(color, CircleShape))
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(label, color = NotionTextSecondary, fontSize = 12.sp, modifier = Modifier.width(50.dp))
-        Text(percent, color = NotionTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-fun SummaryCard(title: String, value: String, subValue: String? = null, comparison: String? = null, modifier: Modifier = Modifier) {
-    Box(modifier = modifier.border(1.dp, NotionBorder, RoundedCornerShape(12.dp)).background(Color.White, RoundedCornerShape(12.dp)).padding(20.dp)) {
-        Column {
-            Text(text = title, color = NotionTextSecondary, style = MaterialTheme.typography.labelMedium)
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(text = value, color = NotionTextPrimary, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            if (subValue != null) {
-                Text(text = subValue, color = NotionTextSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
-            }
-        }
-        if (comparison != null) {
-            val isIncrease = comparison.startsWith("+")
-            val badgeBgColor = if (isIncrease) Color(0xFFFFF1F1) else Color(0xFFF0F9F4)
-            val badgeTextColor = if (isIncrease) Color(0xFFE57373) else NotionSafeGreen
-            Surface(modifier = Modifier.align(Alignment.TopEnd).widthIn(min = 56.dp), color = badgeBgColor, shape = RoundedCornerShape(50.dp)) {
-                Text(text = comparison, color = badgeTextColor, fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-            }
-        }
-    }
-}
 
 // --- 2. 記録画面 ---
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InputScreen(dao: FinanceDao) {
+    var isExpense by remember { mutableStateOf(true) } // true=支出, false=収入
     var amountText by remember { mutableStateOf("") }
     var memoText by remember { mutableStateOf("") }
     var selectedAssetEntity by remember { mutableStateOf<AssetEntity?>(null) }
@@ -618,14 +696,14 @@ fun InputScreen(dao: FinanceDao) {
     val dateFormatter = remember { SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN) }
     var selectedCategory by remember { mutableStateOf<CategoryData?>(null) }
     var showKeypad by remember { mutableStateOf(false) }
-    
+
     val haptic = LocalHapticFeedback.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     val dbAssets by dao.getAllAssets().collectAsState(initial = emptyList())
 
-    val categories = listOf(
+    val expenseCategories = listOf(
         CategoryData("食費", Icons.Default.ShoppingCart),
         CategoryData("日用品", Icons.Default.Build),
         CategoryData("交通費", Icons.Default.Place),
@@ -635,14 +713,27 @@ fun InputScreen(dao: FinanceDao) {
         CategoryData("健康", Icons.Default.Info),
         CategoryData("その他", Icons.Default.MoreHoriz)
     )
+    val incomeCategories = listOf(
+        CategoryData("給与", Icons.Default.AccountBalance),
+        CategoryData("賞与", Icons.Default.Star),
+        CategoryData("副業", Icons.Default.Build),
+        CategoryData("お小遣い", Icons.Default.Favorite),
+        CategoryData("還付金", Icons.Default.Info),
+        CategoryData("その他", Icons.Default.MoreHoriz)
+    )
+    val categories = if (isExpense) expenseCategories else incomeCategories
+
+    // モード切替時にカテゴリをリセット
+    LaunchedEffect(isExpense) { selectedCategory = null }
+
+    val themeColor = NotionTextPrimary
+    val accentColor = if (isExpense) Color(0xFF2196F3) else NotionSafeGreen
 
     val isSaveEnabled = amountText.isNotEmpty() && selectedAssetEntity != null && selectedCategory != null
     val onSave: () -> Unit = {
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        
         val amountValue = evaluateExpression(amountText)
         val asset = selectedAssetEntity
-        
         if (asset != null) {
             val transaction = TransactionEntity(
                 id = UUID.randomUUID().toString(),
@@ -650,26 +741,22 @@ fun InputScreen(dao: FinanceDao) {
                 amount = amountValue,
                 category = selectedCategory?.name ?: "その他",
                 date = selectedDate,
-                assetName = asset.name
+                assetName = asset.name,
+                isExpense = isExpense
             )
-            
             scope.launch {
-                // 1. トランザクションを挿入
                 dao.insertTransaction(transaction)
-                // 2. 資産残高を更新
                 val updatedAsset = asset.copy(
-                    amount = asset.amount - amountValue,
+                    amount = if (isExpense) asset.amount - amountValue else asset.amount + amountValue,
                     lastUpdated = System.currentTimeMillis()
                 )
                 dao.updateAsset(updatedAsset)
-                
-                // 状態をリセット
                 amountText = ""
                 memoText = ""
                 selectedCategory = null
                 selectedAssetEntity = null
                 showKeypad = false
-                snackbarHostState.showSnackbar("記録を保存しました")
+                snackbarHostState.showSnackbar(if (isExpense) "支出を記録しました" else "収入を記録しました")
             }
         }
     }
@@ -679,13 +766,50 @@ fun InputScreen(dao: FinanceDao) {
             modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp).verticalScroll(rememberScrollState())
         ) {
             Spacer(modifier = Modifier.height(24.dp))
-            Text("消費の記録", color = NotionTextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            
+            Text(
+                text = if (isExpense) "消費の記録" else "収入の記録",
+                color = themeColor,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
+            )
+
             Spacer(modifier = Modifier.height(16.dp))
+
+            // 支出 / 収入 切り替えタブ
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .background(Color(0xFFF0F0F0), RoundedCornerShape(12.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf(true to "支出", false to "収入").forEach { (mode, label) ->
+                    val selected = isExpense == mode
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(if (selected) Color.White else Color.Transparent)
+                            .clickable { isExpense = mode },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 14.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) (if (mode) NotionTextPrimary else NotionSafeGreen) else NotionTextSecondary
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
 
             Text("総額", color = NotionTextSecondary, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(12.dp))
-            
+
             Row(
                 modifier = Modifier.fillMaxWidth().height(64.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -703,23 +827,25 @@ fun InputScreen(dao: FinanceDao) {
                 ) {
                     Text(
                         text = if (amountText.isEmpty()) "¥ 0" else "¥ $amountText",
-                        color = if (amountText.isEmpty()) NotionBorder else NotionTextPrimary,
+                        color = if (amountText.isEmpty()) NotionBorder else themeColor,
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
-
-                // OCRボタン
                 IconButton(
-                    onClick = { /* OCR処理のモック */ },
+                    onClick = { /* OCR / 明細撮影 */ },
                     modifier = Modifier
                         .size(64.dp)
-                        .background(NotionBackground, RoundedCornerShape(12.dp))
+                        .background(Color(0xFFF0F0F0), RoundedCornerShape(12.dp))
                         .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
                 ) {
-                    Icon(Icons.Default.PhotoCamera, contentDescription = "レシートを撮影", tint = NotionTextPrimary)
+                    Icon(
+                        Icons.Default.PhotoCamera,
+                        contentDescription = if (isExpense) "レシートを撮影" else "給与明細を撮影",
+                        tint = NotionTextPrimary
+                    )
                 }
             }
 
@@ -727,13 +853,17 @@ fun InputScreen(dao: FinanceDao) {
 
             Text("カテゴリ", color = NotionTextSecondary, style = MaterialTheme.typography.titleSmall)
             Spacer(modifier = Modifier.height(12.dp))
-            
+
             Box(
                 modifier = Modifier.fillMaxWidth().border(1.dp, NotionBorder, RoundedCornerShape(12.dp)).background(Color.White, RoundedCornerShape(12.dp)).padding(12.dp)
             ) {
+                // 行数に応じて高さを計算（アイテム1行≒57dp、行間8dp）
+                val categoryCount = categories.size
+                val rowCount = (categoryCount + 3) / 4
+                val gridHeight = (rowCount * 57 + (rowCount - 1) * 8).dp
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(4),
-                    modifier = Modifier.height(160.dp),
+                    modifier = Modifier.height(gridHeight),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     userScrollEnabled = false
@@ -741,12 +871,26 @@ fun InputScreen(dao: FinanceDao) {
                     items(categories) { category ->
                         val isSelected = selectedCategory == category
                         Column(
-                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (isSelected) NotionSafeGreen.copy(alpha = 0.1f) else Color.Transparent).clickable { selectedCategory = category }.padding(8.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) accentColor.copy(alpha = 0.1f) else Color.Transparent)
+                                .clickable { selectedCategory = category }
+                                .padding(8.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(imageVector = category.icon, contentDescription = category.name, tint = if (isSelected) NotionSafeGreen else NotionTextSecondary, modifier = Modifier.size(24.dp))
+                            Icon(
+                                imageVector = category.icon,
+                                contentDescription = category.name,
+                                tint = if (isSelected) accentColor else NotionTextSecondary,
+                                modifier = Modifier.size(24.dp)
+                            )
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(category.name, fontSize = 10.sp, color = if (isSelected) NotionSafeGreen else NotionTextSecondary, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                            Text(
+                                category.name,
+                                fontSize = 10.sp,
+                                color = if (isSelected) accentColor else NotionTextSecondary,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
                         }
                     }
                 }
@@ -754,7 +898,7 @@ fun InputScreen(dao: FinanceDao) {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Text("品目", color = NotionTextSecondary, style = MaterialTheme.typography.titleSmall)
+            Text(if (isExpense) "品目" else "内容", color = NotionTextSecondary, style = MaterialTheme.typography.titleSmall)
             Spacer(modifier = Modifier.height(12.dp))
 
             Box(
@@ -771,7 +915,11 @@ fun InputScreen(dao: FinanceDao) {
                     modifier = Modifier.fillMaxWidth(),
                     decorationBox = { innerTextField ->
                         if (memoText.isEmpty()) {
-                            Text("何にお金を使いましたか？（例: カフェ代）", color = NotionTextSecondary, fontSize = 15.sp)
+                            Text(
+                                if (isExpense) "何にお金を使いましたか？（例: カフェ代）" else "収入の内容を入力（例: 3月分給与）",
+                                color = NotionTextSecondary,
+                                fontSize = 15.sp
+                            )
                         }
                         innerTextField()
                     }
@@ -791,15 +939,21 @@ fun InputScreen(dao: FinanceDao) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("支払い元", color = NotionTextPrimary, fontWeight = FontWeight.Medium)
+                    Text(
+                        if (isExpense) "支払い元" else "入金先",
+                        color = NotionTextPrimary,
+                        fontWeight = FontWeight.Medium
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = selectedAssetEntity?.name ?: "未選択", color = if (selectedAssetEntity == null) NotionTextSecondary else Color(0xFF2196F3), fontWeight = FontWeight.Bold)
+                        Text(
+                            text = selectedAssetEntity?.name ?: "未選択",
+                            color = if (selectedAssetEntity == null) NotionTextSecondary else accentColor,
+                            fontWeight = FontWeight.Bold
+                        )
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = NotionTextSecondary)
                     }
                 }
-
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = NotionBorder)
-
                 Row(
                     modifier = Modifier.fillMaxWidth().clickable { showDatePicker = true }.padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -807,7 +961,7 @@ fun InputScreen(dao: FinanceDao) {
                 ) {
                     Text("日付", color = NotionTextPrimary, fontWeight = FontWeight.Medium)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = dateFormatter.format(Date(selectedDate)), color = Color(0xFF2196F3), fontWeight = FontWeight.Bold)
+                        Text(text = dateFormatter.format(Date(selectedDate)), color = accentColor, fontWeight = FontWeight.Bold)
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = NotionTextSecondary)
                     }
                 }
@@ -815,15 +969,19 @@ fun InputScreen(dao: FinanceDao) {
 
             if (!showKeypad) {
                 Spacer(modifier = Modifier.height(32.dp))
-
                 Button(
                     onClick = onSave,
                     modifier = Modifier.fillMaxWidth().height(56.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen, disabledContainerColor = NotionBorder),
+                    colors = ButtonDefaults.buttonColors(containerColor = accentColor, disabledContainerColor = NotionBorder),
                     shape = RoundedCornerShape(12.dp),
                     enabled = isSaveEnabled
                 ) {
-                    Text("記録を保存する", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (isExpense) "支出を記録する" else "収入を記録する",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
@@ -1204,20 +1362,63 @@ fun AssetsScreen(dao: FinanceDao) {
             }
         } else {
             // 履歴タブ
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                val dateFormatter = SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN)
-                if (transactions.isEmpty()) {
-                    Text("記録がありません", modifier = Modifier.padding(16.dp).fillMaxWidth(), textAlign = TextAlign.Center, color = NotionTextSecondary)
-                }
-                transactions.forEach { tx ->
-                    AssetHistoryItem(
-                        date = dateFormatter.format(Date(tx.date)),
-                        name = tx.name,
-                        amount = "- ¥ ${String.format("%,d", tx.amount)}",
-                        memo = tx.category,
-                        balanceAfter = tx.assetName,
-                        onLongClick = { transactionToDelete = tx }
-                    )
+            val historyIconMap = mapOf(
+                "食費" to Icons.Default.ShoppingCart,
+                "日用品" to Icons.Default.Build,
+                "交通費" to Icons.Default.Place,
+                "交際費" to Icons.Default.Favorite,
+                "娯楽" to Icons.Default.Star,
+                "美容" to Icons.Default.Face,
+                "健康" to Icons.Default.Info,
+                "その他" to Icons.Default.MoreHoriz,
+                "給与" to Icons.Default.AccountBalance,
+                "賞与" to Icons.Default.Star,
+                "副業" to Icons.Default.Build,
+                "お小遣い" to Icons.Default.Favorite,
+                "還付金" to Icons.Default.Info
+            )
+            val dateFormatter = SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN)
+            if (transactions.isEmpty()) {
+                Text("記録がありません", modifier = Modifier.padding(16.dp).fillMaxWidth(), textAlign = TextAlign.Center, color = NotionTextSecondary)
+            }
+            // 日付ごとにグループ化して見出し表示
+            val groupedByDate = transactions.groupBy { dateFormatter.format(Date(it.date)) }
+            groupedByDate.forEach { (dateLabel, txList) ->
+                // 日付見出し
+                Text(
+                    text = dateLabel,
+                    color = NotionTextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                )
+                // その日の取引をまとめて1ブロックで表示
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White, RoundedCornerShape(12.dp))
+                        .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
+                ) {
+                    Column {
+                        txList.forEachIndexed { idx, tx ->
+                            AssetHistoryItem(
+                                name = tx.name,
+                                amount = "¥ ${String.format("%,d", tx.amount)}",
+                                memo = tx.category,
+                                balanceAfter = tx.assetName,
+                                isExpense = tx.isExpense,
+                                icon = historyIconMap[tx.category] ?: Icons.Default.MoreHoriz,
+                                onLongClick = { transactionToDelete = tx }
+                            )
+                            if (idx < txList.lastIndex) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    thickness = 0.5.dp,
+                                    color = NotionBorder
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2305,21 +2506,52 @@ fun AssetListItemRow(item: AssetItemData, onClick: () -> Unit, onLongClick: () -
 }
 
 @Composable
-fun AssetHistoryItem(date: String, name: String, amount: String, memo: String, balanceAfter: String, onLongClick: () -> Unit) {
+fun AssetHistoryItem(
+    name: String,
+    amount: String,
+    memo: String,
+    balanceAfter: String,
+    isExpense: Boolean = true,
+    icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Default.MoreHoriz,
+    onLongClick: () -> Unit
+) {
     val haptic = LocalHapticFeedback.current
-    Box(
-        modifier = Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(12.dp)).border(1.dp, NotionBorder, RoundedCornerShape(12.dp)).combinedClickable(
-            onClick = {}, onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLongClick() }
-        ).padding(16.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = {},
+                onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLongClick() }
+            )
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-            Column(modifier = Modifier.weight(1f)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .background(
+                        if (isExpense) Color(0xFFFFEBEE) else NotionSafeGreen.copy(alpha = 0.08f),
+                        RoundedCornerShape(10.dp)
+                    )
+                    .border(1.dp, NotionBorder, RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = memo,
+                    tint = if (isExpense) Color(0xFFE57373) else NotionSafeGreen,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
                 Text(name, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 Text("$memo　$balanceAfter", color = NotionTextSecondary, fontSize = 12.sp)
-                Text(date, color = NotionTextSecondary, fontSize = 11.sp)
             }
-            Text(amount, color = Color(0xFFE57373), fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
+        Text(amount, color = if (isExpense) Color(0xFFE57373) else NotionSafeGreen, fontSize = 15.sp, fontWeight = FontWeight.Bold)
     }
 }
 
