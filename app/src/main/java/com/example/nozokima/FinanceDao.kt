@@ -58,20 +58,4 @@ interface FinanceDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertGoalSetting(setting: GoalSettingEntity)
-
-    // 貸付
-    @Query("SELECT * FROM loans ORDER BY date DESC")
-    fun getAllLoans(): Flow<List<LoanEntity>>
-
-    @Query("SELECT * FROM loans WHERE isCollected = 0 ORDER BY date DESC")
-    fun getActiveLoans(): Flow<List<LoanEntity>>
-
-    @Insert
-    suspend fun insertLoan(loan: LoanEntity)
-
-    @Update
-    suspend fun updateLoan(loan: LoanEntity)
-
-    @Delete
-    suspend fun deleteLoan(loan: LoanEntity)
 }
