@@ -58,4 +58,16 @@ interface FinanceDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertGoalSetting(setting: GoalSettingEntity)
+
+    @Query("SELECT * FROM lendings")
+    fun getAllLendings(): Flow<List<LendingEntity>>
+
+    @Insert
+    suspend fun insertLending(lending: LendingEntity)
+
+    @Update
+    suspend fun updateLending(lending: LendingEntity)
+
+    @Delete
+    suspend fun deleteLending(lending: LendingEntity)
 }
