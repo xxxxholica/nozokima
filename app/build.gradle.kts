@@ -68,13 +68,13 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    val roomVersion = "2.6.1"
+    val roomVersion = "2.8.4"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 
     implementation("net.objecthunter:exp4j:0.4.8")
 
-    // MediaPipe LLM Inference
-    implementation("com.google.mediapipe:tasks-genai:0.10.33")
+    // ML Kit GenAI Prompt API (Gemini Nano)
+    implementation("com.google.mlkit:genai-prompt:1.0.0-beta2")
 }

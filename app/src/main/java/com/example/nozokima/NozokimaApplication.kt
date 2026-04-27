@@ -12,5 +12,5 @@ class NozokimaApplication : Application() {
         ).fallbackToDestructiveMigration().build()
     }
 
-    val gemmaModel by lazy { GemmaModel(this) }
+    val geminiModel by lazy { GeminiNanoModel(this) }
 }

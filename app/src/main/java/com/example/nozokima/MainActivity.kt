@@ -5,7 +5,9 @@ package com.example.nozokima
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.foundation.BorderStroke
@@ -46,6 +48,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -53,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ui.theme.*
 import androidx.room.Room
+import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -130,10 +134,11 @@ data class ChatMessage(
 
 class MainActivity : ComponentActivity() {
     private val db by lazy { (application as NozokimaApplication).database }
-    private val gemma by lazy { GemmaModel(this) }
+    private val gemini by lazy { (application as NozokimaApplication).geminiModel }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
 
         // Android 13+ で通知権限をリクエスト
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -152,97 +157,117 @@ class MainActivity : ComponentActivity() {
 
             val dao = db.financeDao()
 
-            // --- バックグラウンドダウンロード管理（タブ切替後も継続）---
-            val needsDownload by gemma.needsDownloadPermission.collectAsState()
+            // --- AIモデルの状態管理 ---
+            val aiStatus by gemini.status.collectAsState()
+            val errorMessage by gemini.errorMessage.collectAsState()
             val scope = rememberCoroutineScope()
 
-            // AI相談タブを開いたとき、未準備なら許可ダイアログをリクエスト
+            // キーボードの表示状態を監視
+            val isKeyboardVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
+
+            // AI相談タブを開いたとき、状態を確認
             LaunchedEffect(selectedTab) {
                 if (selectedTab == 3) {
-                    gemma.requestModelDownload()
+                    gemini.checkModelStatus()
                 }
             }
 
-            // ダウンロード許可ダイアログ（Activityレベル → タブ切替しても継続）
-            if (needsDownload) {
+            // ダウンロード許可ダイアログ
+            if (aiStatus == FeatureStatus.DOWNLOADABLE) {
                 AlertDialog(
-                    onDismissRequest = { gemma.declineModelDownload() },
+                    onDismissRequest = { /* システム側で管理するため何もしない */ },
                     title = { Text("追加のダウンロード") },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("AI相談の利用にはAIモデルが必要です。\nダウンロードはWi-Fi 接続を推奨します。", fontSize = 14.sp)
-                            Spacer(Modifier.height(2.dp))
-                            Text("・Gemma-4-E4B-it（約5GB）", fontSize = 13.sp, color = NotionTextSecondary)
+                            Text("AI相談の利用にはAIモデル(Gemini Nano)が必要です。\nダウンロードはWi-Fi 接続を推奨します。", fontSize = 14.sp)
                         }
                     },
                     confirmButton = {
                         TextButton(onClick = {
-                            scope.launch { gemma.startDownloadIfPermitted() }
+                            scope.launch { gemini.startDownload() }
                         }) { Text("ダウンロード開始") }
                     },
                     dismissButton = {
-                        TextButton(onClick = { gemma.declineModelDownload() }) { Text("キャンセル") }
+                        TextButton(onClick = { /* キャンセル */ }) { Text("キャンセル") }
                     }
                 )
             }
 
             Surface(modifier = Modifier.fillMaxSize(), color = NotionBackground) {
                 Scaffold(
+                    contentWindowInsets = WindowInsets.systemBars,
                     bottomBar = {
-                        NavigationBar(containerColor = NotionWhite, tonalElevation = 0.dp) {
-                            val items = listOf("ホーム", "記録", "資産状況", "AI相談", "設定")
-                            val icons = listOf(Icons.Default.Home, Icons.Default.Add, Icons.Default.List, Icons.Default.Face, Icons.Default.Settings)
-                            items.forEachIndexed { index, item ->
-                                NavigationBarItem(
-                                    icon = { Icon(icons[index], contentDescription = item) },
-                                    label = { Text(item, fontSize = 10.sp) },
-                                    selected = selectedTab == index,
-                                    onClick = {
-                                        if (index != 3) consultingTransaction = null
-                                        selectedTab = index
-                                    },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = NotionSafeGreen,
-                                        unselectedIconColor = NotionTextSecondary,
-                                        indicatorColor = Color.Transparent
+                        // キーボード表示時はナビゲーションバーを隠す
+                        if (!isKeyboardVisible) {
+                            NavigationBar(containerColor = NotionWhite, tonalElevation = 0.dp) {
+                                val items = listOf("ホーム", "記録", "資産状況", "AI相談", "設定")
+                                val icons = listOf(Icons.Default.Home, Icons.Default.Add, Icons.Default.List, Icons.Default.Face, Icons.Default.Settings)
+                                items.forEachIndexed { index, item ->
+                                    NavigationBarItem(
+                                        icon = { Icon(icons[index], contentDescription = item) },
+                                        label = { Text(item, fontSize = 10.sp) },
+                                        selected = selectedTab == index,
+                                        onClick = {
+                                            if (index != 3) consultingTransaction = null
+                                            selectedTab = index
+                                        },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = NotionSafeGreen,
+                                            unselectedIconColor = NotionTextSecondary,
+                                            indicatorColor = Color.Transparent
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                     }
                 ) { innerPadding ->
-                    Box(modifier = Modifier.padding(innerPadding)) {
+                    Box(modifier = Modifier.fillMaxSize()) {
                         when (selectedTab) {
-                            0 -> HomeScreen(
-                                dao = dao,
-                                onConsultClick = { tx ->
-                                    consultingTransaction = tx
-                                    selectedTab = 3
-                                },
-                                onNavigateToSettings = {
-                                    selectedTab = 4
-                                }
-                            )
-                            1 -> InputScreen(
-                                dao = dao,
-                                gemma = gemma,
-                                initialRecovery = recoveryLending,
-                                onRecoveryHandled = { recoveryLending = null }
-                            )
-                            2 -> AssetsScreen(
-                                dao = dao,
-                                onRecoverClick = { lending ->
-                                    recoveryLending = lending
-                                    selectedTab = 1
-                                }
-                            )
-                            3 -> ConsultationScreen(
-                                messages = chatMessages,
-                                initialTransaction = consultingTransaction,
-                                onClearConsultation = { consultingTransaction = null },
-                                gemma = gemma
-                            )
-                            4 -> BudgetSettingsScreen(dao)
+                            0 -> Box(Modifier.padding(innerPadding)) {
+                                HomeScreen(
+                                    dao = dao,
+                                    onConsultClick = { tx ->
+                                        consultingTransaction = tx
+                                        selectedTab = 3
+                                    },
+                                    onNavigateToSettings = {
+                                        selectedTab = 4
+                                    }
+                                )
+                            }
+                            1 -> Box(Modifier.padding(innerPadding)) {
+                                InputScreen(
+                                    dao = dao,
+                                    gemini = gemini,
+                                    initialRecovery = recoveryLending,
+                                    onRecoveryHandled = { recoveryLending = null }
+                                )
+                            }
+                            2 -> Box(Modifier.padding(innerPadding)) {
+                                AssetsScreen(
+                                    dao = dao,
+                                    onRecoverClick = { lending ->
+                                        recoveryLending = lending
+                                        selectedTab = 1
+                                    }
+                                )
+                            }
+                            3 -> {
+                                ConsultationScreen(
+                                    messages = chatMessages,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(innerPadding)
+                                        .consumeWindowInsets(innerPadding),
+                                    initialTransaction = consultingTransaction,
+                                    onClearConsultation = { consultingTransaction = null },
+                                    gemini = gemini
+                                )
+                            }
+                            4 -> Box(Modifier.padding(innerPadding)) {
+                                BudgetSettingsScreen(dao)
+                            }
                         }
                     }
                 }
@@ -751,7 +776,7 @@ fun HomeScreen(
 @Composable
 fun InputScreen(
     dao: FinanceDao,
-    gemma: GemmaModel? = null,
+    gemini: GeminiNanoModel? = null,
     initialRecovery: LendingEntity? = null,
     onRecoveryHandled: () -> Unit = {}
 ) {
@@ -857,9 +882,9 @@ fun InputScreen(
                             lastUpdated = System.currentTimeMillis()
                         ))
                         
-                        if (gemma != null && isExp) {
+                        if (gemini != null && isExp) {
                             val prompt = "私は今、$amountValue 円を「$currentCategory」に使いました（メモ：$currentMemo）。これに対する1行の短い節約アドバイスをください。"
-                            val aiResponse = gemma.generateResponse(prompt)
+                            val aiResponse = gemini.generateResponse(prompt)
                             snackbarHostState.showSnackbar(aiResponse.ifBlank { "記録しました！" })
                         } else {
                             snackbarHostState.showSnackbar("記録しました")
@@ -935,7 +960,7 @@ fun InputScreen(
 
     BackHandler(enabled = showKeypad) { showKeypad = false }
 
-    Box(modifier = Modifier.fillMaxSize().background(NotionBackground)) {
+    Box(modifier = Modifier.fillMaxSize().background(NotionBackground).imePadding()) {
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
         ) {
@@ -2303,17 +2328,29 @@ fun AssetsScreen(dao: FinanceDao, onRecoverClick: (LendingEntity) -> Unit = {}) 
 @Composable
 fun ConsultationScreen(
     messages: SnapshotStateList<ChatMessage>,
+    modifier: Modifier = Modifier,
     initialTransaction: Transaction? = null,
     onClearConsultation: () -> Unit = {},
-    gemma: GemmaModel? = null
+    gemini: GeminiNanoModel? = null
 ) {
     var inputText by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
 
-    // --- 準備状態と進捗を取得 ---
-    val isReady by (gemma?.isReady?.collectAsState() ?: remember { mutableStateOf(false) })
-    val progress by (gemma?.copyProgress?.collectAsState() ?: remember { mutableIntStateOf(0) })
-    val errorMessage by (gemma?.errorMessage?.collectAsState() ?: remember { mutableStateOf<String?>(null) })
+    // --- 各種状態取得 ---
+    val isReady by (gemini?.isReady?.collectAsState() ?: remember { mutableStateOf(false) })
+    val isDownloading by (gemini?.isDownloading?.collectAsState() ?: remember { mutableStateOf(false) })
+    val progress by (gemini?.downloadProgress?.collectAsState() ?: remember { mutableIntStateOf(0) })
+    val errorMsg by (gemini?.errorMessage?.collectAsState() ?: remember { mutableStateOf<String?>(null) })
+    val isGenerating by (gemini?.isGenerating?.collectAsState() ?: remember { mutableStateOf(false) })
+
+    val photoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            messages.add(ChatMessage(text = "画像を解析してください", imageUri = uri, isUser = true))
+        }
+    }
 
     // 初期相談データの処理
     LaunchedEffect(initialTransaction) {
@@ -2321,17 +2358,31 @@ fun ConsultationScreen(
             val tx = initialTransaction
             val alreadyAsked = messages.any { it.text.contains(tx.id) || (it.text.contains(tx.name) && it.isUser) }
             if (!alreadyAsked) {
-                messages.add(ChatMessage(text = "支出「${tx.name}」(¥${String.format("%,d", tx.amount)})について相談したいです。", isUser = true))
+                messages.add(ChatMessage(text = "支出「${tx.name}」(¥${String.format(Locale.JAPAN, "%,d", tx.amount)})について相談したいです。", isUser = true))
                 messages.add(ChatMessage(text = "「${tx.name}」ですね。${tx.category}カテゴリの支出ですが、これは未来の自分への投資になりそうですか？それとも単なる浪費でしたか？", isUser = false))
             }
             onClearConsultation()
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // レイアウト本体（二重定義を解消したクリーンな構造）
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Column(
+        modifier = modifier
+            .consumeWindowInsets(WindowInsets.navigationBars)
+            .imePadding()
+    ) {
+        // ヘッダー
         ScreenHeader(title = "AI相談")
 
-        // --- モデルの準備（ダウンロード）状況を表示 ---
+        // 1. AIモデルの準備状況表示
         if (!isReady) {
             Surface(
                 modifier = Modifier
@@ -2342,115 +2393,113 @@ fun ConsultationScreen(
                 border = BorderStroke(1.dp, NotionBorder)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    if (errorMessage != null) {
-                        // エラー表示
+                    if (errorMsg != null) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFE57373), modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(errorMessage ?: "", fontSize = 12.sp, color = Color(0xFFE57373))
+                            Icon(Icons.Default.Warning, null, tint = Color(0xFFE57373), modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(errorMsg ?: "", fontSize = 12.sp, color = Color(0xFFE57373))
                         }
-                    } else if (progress > 0) {
-                        // ダウンロード中
-                        Text("AIモデルをダウンロード中... $progress%", fontSize = 12.sp, color = NotionTextSecondary)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = { progress / 100f },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = NotionSafeGreen
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("別のメニューに移動してもダウンロードは継続されます。", fontSize = 11.sp, color = NotionTextSecondary)
-                    } else {
-                        // 未開始（ダウンロード許可待ち）
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Info, contentDescription = null, tint = NotionTextSecondary, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("利用を開始するにはAIモデルのダウンロードが必要です。", fontSize = 12.sp, color = NotionTextSecondary)
-                        }
+                    } else if (isDownloading) {
+                        Text("AIモデルを準備中... $progress%", fontSize = 12.sp, color = NotionTextSecondary)
+                        Spacer(Modifier.height(8.dp))
+                        LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth(), color = NotionSafeGreen)
                     }
                 }
             }
         }
 
-        val listState = rememberLazyListState()
-
-        LaunchedEffect(messages.size) {
-            if (messages.isNotEmpty()) {
-                listState.animateScrollToItem(messages.size - 1)
-            }
-        }
-
-        // チャット履歴
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(messages) { msg ->
-                ChatBubble(msg)
-            }
-        }
-
-        // 入力フォーム
-        Surface(
-            modifier = Modifier.fillMaxWidth().imePadding(),
-            color = Color.White,
-            tonalElevation = 2.dp,
-            border = BorderStroke(1.dp, NotionBorder)
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+        // 2. チャット履歴エリア
+        Box(modifier = Modifier.weight(1f)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                IconButton(onClick = { /* レシート撮影ロジック */ }) {
-                    Icon(Icons.Default.AddCircle, contentDescription = "レシート撮影", tint = NotionSafeGreen)
+                items(messages) { msg ->
+                    ChatBubble(msg)
                 }
-                Box(
+            }
+
+            if (isGenerating) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().height(2.dp).align(Alignment.TopCenter),
+                    color = NotionSafeGreen,
+                    trackColor = Color.Transparent
+                )
+            }
+        }
+
+        // 3. 入力フォームエリア（キーボード直上に張り付く）
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(28.dp),
+                color = Color.White,
+                shadowElevation = 4.dp,
+                border = BorderStroke(1.dp, NotionBorder)
+            ) {
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .background(NotionBackground, RoundedCornerShape(20.dp))
-                        .border(1.dp, NotionBorder, RoundedCornerShape(20.dp))
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (inputText.isEmpty()) {
-                        Text("相談内容を入力...", color = NotionTextSecondary, fontSize = 14.sp)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 4.dp)
+                    ) {
+                        if (inputText.isEmpty()) {
+                            Text("相談内容を入力...", color = NotionTextSecondary, fontSize = 15.sp)
+                        }
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = inputText,
+                            onValueChange = { inputText = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, color = NotionTextPrimary),
+                            maxLines = 5
+                        )
                     }
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // 送信ボタン
-                IconButton(
-                    onClick = {
-                        if (inputText.isNotBlank() && gemma != null) {
-                            val userMsg = inputText
-                            messages.add(ChatMessage(text = userMsg, isUser = true))
-                            inputText = ""
-
-                            scope.launch {
-                                val aiMsgId = "ai_reply_${System.currentTimeMillis()}"
-                                messages.add(ChatMessage(id = aiMsgId, text = "...", isUser = false))
-
-                                // ここで gemma を参照
-                                val response = gemma.generateResponse(userMsg)
-
-                                val index = messages.indexOfFirst { it.id == aiMsgId }
-                                if (index != -1) {
-                                    messages[index] = ChatMessage(id = aiMsgId, text = response, isUser = false)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = { photoLauncher.launch("image/*") },
+                        modifier = Modifier
+                            .background(NotionSafeGreen, CircleShape)
+                            .size(36.dp)
+                    ) {
+                        Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    IconButton(
+                        onClick = {
+                            if (inputText.isNotBlank() && gemini != null) {
+                                val userMsg = inputText
+                                messages.add(ChatMessage(text = userMsg, isUser = true))
+                                inputText = ""
+                                scope.launch {
+                                    val aiMsgId = "ai_reply_${System.currentTimeMillis()}"
+                                    messages.add(ChatMessage(id = aiMsgId, text = "...", isUser = false))
+                                    var accumulatedText = ""
+                                    gemini.generateResponseStream(userMsg).collect { chunk ->
+                                        accumulatedText += chunk
+                                        val index = messages.indexOfFirst { it.id == aiMsgId }
+                                        if (index != -1) {
+                                            messages[index] = ChatMessage(id = aiMsgId, text = accumulatedText, isUser = false)
+                                        }
+                                    }
                                 }
                             }
-                        }
-                    },
-                    modifier = Modifier
-                        .background(if (inputText.isNotBlank()) NotionSafeGreen else NotionBorder, RoundedCornerShape(50.dp))
-                        .size(36.dp)
-                ) {
-                    Icon(Icons.Default.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        },
+                        modifier = Modifier
+                            .background(if (inputText.isNotBlank()) NotionSafeGreen else NotionBorder, CircleShape)
+                            .size(36.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
                 }
             }
         }
@@ -2503,23 +2552,25 @@ fun ChatBubble(message: ChatMessage) {
                 Image(
                     painter = painterResource(id = R.drawable.nozokima),
                     contentDescription = null,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "覗き魔 AI",
-                    color = NotionTextPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("覗き魔 AI", color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Surface(color = Color(0xFF2196F3).copy(alpha = 0.15f), shape = RoundedCornerShape(20.dp)) {
+                        Text("難易度：スパルタ", color = Color(0xFFD32F2F), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = message.text,
                     color = NotionTextPrimary,
                     fontSize = 15.sp,
-                    lineHeight = 22.sp
+                    lineHeight = 22.sp,
+                    modifier = Modifier.alpha(if (message.text == "...") 0.5f else 1f)
                 )
             }
         }
@@ -3039,8 +3090,10 @@ fun BudgetSettingsScreen(dao: FinanceDao) {
         }
     }
 
-    } // end Box
-}
+} // end Box
+} // end BudgetSettingsScreen
+
+// --- ヘルパー Composable ---
 
 @Composable
 private fun SettingSummaryChip(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
@@ -3053,11 +3106,9 @@ private fun SettingSummaryChip(label: String, value: String, color: Color, modif
     }
 }
 
-// ─── ヘルパー Composable ─────────────────────────────────────────────
-
 @Composable
 private fun GoalStepper(currentStep: Int) {
-    val steps = listOf("設定", "経過", "達成")
+    val steps = listOf("設定", "継続", "達成")
     val stepColors = listOf(NotionSafeGreen, Color(0xFF2196F3), Color(0xFFFFB74D))
 
     Row(
@@ -3237,24 +3288,16 @@ fun AssetHistoryItem(
             Box(
                 modifier = Modifier
                     .size(38.dp)
-                    .background(
-                        color.copy(alpha = 0.08f),
-                        RoundedCornerShape(10.dp)
-                    )
+                    .background(color.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
                     .border(1.dp, NotionBorder, RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = memo,
-                    tint = color,
-                    modifier = Modifier.size(18.dp)
-                )
+                Icon(imageVector = icon, contentDescription = memo, tint = color, modifier = Modifier.size(18.dp))
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column {
                 Text(name, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                Text("$memo　$balanceAfter", color = NotionTextSecondary, fontSize = 12.sp)
+                Text("$memo・$balanceAfter", color = NotionTextSecondary, fontSize = 12.sp)
             }
         }
         Text(amount, color = color, fontSize = 15.sp, fontWeight = FontWeight.Bold)
