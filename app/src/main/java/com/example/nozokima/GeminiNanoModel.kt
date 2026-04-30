@@ -36,9 +36,13 @@ class GeminiNanoModel(private val context: Context) {
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
+    private val _isCheckingStatus = MutableStateFlow(false)
+    val isCheckingStatus: StateFlow<Boolean> = _isCheckingStatus.asStateFlow()
+
     private var totalBytesToDownload: Long = 1L // 0除算防止
 
     suspend fun checkModelStatus() {
+        _isCheckingStatus.value = true
         try {
             val currentStatus = generativeModel.checkStatus()
             _status.value = currentStatus
@@ -47,6 +51,8 @@ class GeminiNanoModel(private val context: Context) {
         } catch (e: Exception) {
             Log.e("GeminiNanoModel", "Error checking status", e)
             _errorMessage.value = "AIの状態確認に失敗しました。"
+        } finally {
+            _isCheckingStatus.value = false
         }
     }
 

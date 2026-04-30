@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
+import androidx.compose.material.icons.automirrored.outlined.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -149,26 +150,144 @@ class MainActivity : ComponentActivity() {
             var selectedTab by remember { mutableIntStateOf(0) }
             var consultingTransaction by remember { mutableStateOf<Transaction?>(null) }
             var recoveryLending by remember { mutableStateOf<LendingEntity?>(null) }
+
+            val dao = db.financeDao()
+
+            // --- 全体データ収集 ---
+            val transactions by dao.getAllTransactions().collectAsState(initial = emptyList())
+            val assets by dao.getAllAssets().collectAsState(initial = emptyList())
+            val budgets by dao.getAllBudgets().collectAsState(initial = emptyList())
+            val goalSetting by dao.getGoalSetting().collectAsState(initial = null)
+
+            // --- AI 状態管理 (Activityレベルで保持してタブ遷移中も継続) ---
+            var homeAiText by rememberSaveable { mutableStateOf("") }
+            var goalAiText by rememberSaveable { mutableStateOf("") }
+
             val chatMessages = remember {
                 mutableStateListOf(
                     ChatMessage("1", "覗き魔AIがあなたの支出判定や未来設計をサポートします。レシート画像を送っていただければ内容の解析も可能です。", isUser = false)
                 )
             }
 
-            val dao = db.financeDao()
-
-            // --- AIモデルの状態管理 ---
             val aiStatus by gemini.status.collectAsState()
-            val errorMessage by gemini.errorMessage.collectAsState()
+            val aiIsReady by gemini.isReady.collectAsState()
+            val aiIsGenerating by gemini.isGenerating.collectAsState()
             val scope = rememberCoroutineScope()
 
             // キーボードの表示状態を監視
             val isKeyboardVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
 
-            // AI相談タブを開いたとき、状態を確認
-            LaunchedEffect(selectedTab) {
-                if (selectedTab == 3) {
-                    gemini.checkModelStatus()
+            // --- AI 分析実行ロジック ---
+
+            fun triggerHomeAnalysis() {
+                if (!aiIsReady || aiIsGenerating) return
+                
+                // データの計算
+                val currentAssets = assets.sumOf { it.amount }
+                val calendar = Calendar.getInstance().apply {
+                    set(Calendar.DAY_OF_MONTH, 1)
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }
+                val startOfMonth = calendar.timeInMillis
+                val spentThisMonth = transactions
+                    .filter { it.date >= startOfMonth && it.isExpense && it.category != "貸付" }
+                    .sumOf { it.amount }
+                val defaultBudget = budgets.sumOf { it.monthlyAmount }.let { if (it == 0) 100000L else it.toLong() }
+                
+                val currentGoal = goalSetting
+                val goalMonthlyBudget = if (currentGoal != null && currentGoal.showResults && currentGoal.targetAmount > 0) {
+                    val remainingDays = ((currentGoal.targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
+                    val remainingMonths = (remainingDays / 30.0).coerceAtLeast(0.1)
+                    val totalExpectedIncome = (currentGoal.monthlyIncome * remainingMonths).toLong()
+                    val totalSpendable = (currentAssets + totalExpectedIncome - currentGoal.targetAmount).coerceAtLeast(0L)
+                    if (remainingMonths > 0) (totalSpendable / remainingMonths).toLong() else 0L
+                } else null
+                val monthlyBudget = goalMonthlyBudget ?: defaultBudget
+
+                val hasGoal = currentGoal != null && currentGoal.targetAmount > 0
+                val goalProgressRatio = if (hasGoal) (currentAssets.toFloat() / currentGoal!!.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
+
+                val prompt = buildString {
+                    appendLine("あなたは家計管理AIアシスタントです。以下の家計データをもとに日本語で100〜150字の簡潔なアドバイスを1つだけ返してください。余計な挨拶・前置きは不要です。")
+                    appendLine("今月の支出: ¥${String.format(Locale.JAPAN, "%,d", spentThisMonth)}")
+                    appendLine("月の予算: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
+                    appendLine("予算消化率: ${if (monthlyBudget > 0) "${(spentThisMonth.toFloat() / monthlyBudget * 100).toInt()}%" else "不明"}")
+                    appendLine("総資産: ¥${String.format(Locale.JAPAN, "%,d", currentAssets)}")
+                    if (hasGoal) appendLine("貯金目標: ¥${String.format(Locale.JAPAN, "%,d", currentGoal!!.targetAmount)}（達成率${(goalProgressRatio * 100).toInt()}%）")
+                    val recentCats = transactions.take(5).joinToString("、") { it.category }
+                    if (recentCats.isNotEmpty()) appendLine("直近の支出カテゴリ: $recentCats")
+                }
+
+                homeAiText = "" // 生成開始前にクリアして "..." を出さない
+                scope.launch {
+                    var result = ""
+                    try {
+                        gemini.generateResponseStream(prompt).collect { chunk ->
+                            result += chunk
+                            homeAiText = result
+                        }
+                    } catch (e: Exception) {
+                        // エラーハンドリング（必要ならメッセージを表示）
+                    }
+                }
+            }
+
+            fun triggerGoalAnalysis() {
+                if (!aiIsReady || aiIsGenerating || goalSetting == null) return
+                val currentGoal = goalSetting!!
+                val actualTotalAssets = assets.sumOf { it.amount }.toLong()
+                val targetAmount = currentGoal.targetAmount
+                val progressRatio = if (targetAmount > 0) (actualTotalAssets.toFloat() / targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
+                val remainingDays = ((currentGoal.targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
+                val remainingMonths = (remainingDays / 30.0).coerceAtLeast(0.1)
+                val totalExpectedIncome = (currentGoal.monthlyIncome * remainingMonths).toLong()
+                val totalSpendable = (actualTotalAssets + totalExpectedIncome - targetAmount).coerceAtLeast(0L)
+                val monthlyBudget = if (remainingMonths > 0) (totalSpendable / remainingMonths).toLong() else 0L
+                val dailyLimit = if (remainingDays > 0) totalSpendable / remainingDays else 0L
+                val difficulty = when { targetAmount == 0L -> "—"; dailyLimit < 1000 -> "スパルタ"; dailyLimit < 3000 -> "普通"; else -> "余裕" }
+
+                val prompt = buildString {
+                    appendLine("あなたは家計管理AIアシスタントです。以下の目標データをもとに日本語で100〜150字の簡潔な励ましのアドバイスを1つだけ返してください。余計な挨拶・前置きは不要です。")
+                    appendLine("目標: ${if (currentGoal.title.isNotEmpty()) currentGoal.title else "貯金"}")
+                    appendLine("目標金額: ¥${String.format(Locale.JAPAN, "%,d", targetAmount)}")
+                    appendLine("現在の資産: ¥${String.format(Locale.JAPAN, "%,d", actualTotalAssets)}")
+                    appendLine("達成率: ${(progressRatio * 100).toInt()}%")
+                    appendLine("残り日数: $remainingDays 日")
+                    appendLine("月の予算: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
+                    appendLine("難易度: $difficulty")
+                }
+
+                goalAiText = ""
+                scope.launch {
+                    var result = ""
+                    try {
+                        gemini.generateResponseStream(prompt).collect { chunk ->
+                            result += chunk
+                            goalAiText = result
+                        }
+                    } catch (e: Exception) {
+                        // エラーハンドリング
+                    }
+                }
+            }
+
+            // アプリ起動時に常にAI状態を確認する
+            LaunchedEffect(Unit) {
+                gemini.checkModelStatus()
+            }
+
+            // 初回生成の自動トリガー（Home -> Goal の順）
+            LaunchedEffect(aiIsReady, assets, transactions) {
+                if (aiIsReady && homeAiText.isEmpty() && assets.isNotEmpty() && !aiIsGenerating) {
+                    triggerHomeAnalysis()
+                }
+            }
+
+            // Home の生成が完了したら Goal をトリガー
+            LaunchedEffect(homeAiText, aiIsGenerating) {
+                if (aiIsReady && homeAiText.isNotEmpty() && !aiIsGenerating && 
+                    goalAiText.isEmpty() && goalSetting != null && goalSetting!!.showResults) {
+                    triggerGoalAnalysis()
                 }
             }
 
@@ -196,29 +315,16 @@ class MainActivity : ComponentActivity() {
             Surface(modifier = Modifier.fillMaxSize(), color = NotionBackground) {
                 Scaffold(
                     contentWindowInsets = WindowInsets.systemBars,
+                    // bottomBarはスペーサーのみ → FloatingNavBarはBoxオーバーレイとして配置することで
+                    // 影がコンテンツの上に落ちる「本物の浮いた」見た目を実現
                     bottomBar = {
-                        // キーボード表示時はナビゲーションバーを隠す
                         if (!isKeyboardVisible) {
-                            NavigationBar(containerColor = NotionWhite, tonalElevation = 0.dp) {
-                                val items = listOf("ホーム", "記録", "資産状況", "AI相談", "設定")
-                                val icons = listOf(Icons.Default.Home, Icons.Default.Add, Icons.Default.List, Icons.Default.Face, Icons.Default.Settings)
-                                items.forEachIndexed { index, item ->
-                                    NavigationBarItem(
-                                        icon = { Icon(icons[index], contentDescription = item) },
-                                        label = { Text(item, fontSize = 10.sp) },
-                                        selected = selectedTab == index,
-                                        onClick = {
-                                            if (index != 3) consultingTransaction = null
-                                            selectedTab = index
-                                        },
-                                        colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = NotionSafeGreen,
-                                            unselectedIconColor = NotionTextSecondary,
-                                            indicatorColor = Color.Transparent
-                                        )
-                                    )
-                                }
-                            }
+                            Spacer(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .navigationBarsPadding()
+                                    .height(72.dp)
+                            )
                         }
                     }
                 ) { innerPadding ->
@@ -227,13 +333,16 @@ class MainActivity : ComponentActivity() {
                             0 -> Box(Modifier.padding(innerPadding)) {
                                 HomeScreen(
                                     dao = dao,
+                                    gemini = gemini,
                                     onConsultClick = { tx ->
                                         consultingTransaction = tx
                                         selectedTab = 3
                                     },
                                     onNavigateToSettings = {
                                         selectedTab = 4
-                                    }
+                                    },
+                                    homeAiText = homeAiText,
+                                    onRefreshAi = { triggerHomeAnalysis() }
                                 )
                             }
                             1 -> Box(Modifier.padding(innerPadding)) {
@@ -266,9 +375,108 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                             4 -> Box(Modifier.padding(innerPadding)) {
-                                BudgetSettingsScreen(dao)
+                                BudgetSettingsScreen(
+                                    dao = dao,
+                                    gemini = gemini,
+                                    goalAiText = goalAiText,
+                                    onRefreshAi = { triggerGoalAnalysis() }
+                                )
                             }
                         }
+
+                        // FloatingNavBarをコンテンツの上にオーバーレイ配置
+                        // → 影がコンテンツに落ちて本物の浮遊感が出る
+                        if (!isKeyboardVisible) {
+                            FloatingNavBar(
+                                selectedTab = selectedTab,
+                                onTabSelected = { index ->
+                                    if (index != 3) consultingTransaction = null
+                                    selectedTab = index
+                                },
+                                modifier = Modifier.align(Alignment.BottomCenter)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// --- フローティングナビゲーションバー ---
+
+@Composable
+fun FloatingNavBar(
+    selectedTab: Int,
+    onTabSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val items = listOf("ホーム", "記録", "資産状況", "AI相談", "目標")
+    val selectedIcons = listOf(
+        Icons.Filled.Home,
+        Icons.Filled.AddCircle,
+        Icons.Filled.BarChart,
+        Icons.AutoMirrored.Filled.Chat,
+        Icons.Filled.TrackChanges
+    )
+    val unselectedIcons = listOf(
+        Icons.Outlined.Home,
+        Icons.Outlined.AddCircle,
+        Icons.Outlined.BarChart,
+        Icons.AutoMirrored.Outlined.Chat,
+        Icons.Outlined.TrackChanges
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(
+                    elevation = 48.dp,
+                    shape = RoundedCornerShape(36.dp),
+                    ambientColor = Color(0x77000000),
+                    spotColor = Color(0x99000000)
+                )
+                .background(NotionWhite, RoundedCornerShape(36.dp))
+                .padding(horizontal = 6.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            items.forEachIndexed { index, label ->
+                val isSelected = selectedTab == index
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(vertical = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // アイコン＋ラベルをまとめてピルで囲む（選択範囲と強調範囲を一致させる）
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(
+                                color = if (isSelected) Color(0xFFD6F0EB) else Color.Transparent,
+                                shape = RoundedCornerShape(20.dp)
+                            )
+                            .clickable(
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null
+                            ) { onTabSelected(index) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isSelected) selectedIcons[index] else unselectedIcons[index],
+                            contentDescription = label,
+                            tint = if (isSelected) NotionSafeGreen else NotionTextSecondary,
+                            modifier = Modifier.size(24.dp)
+                        )
                     }
                 }
             }
@@ -281,8 +489,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun HomeScreen(
     dao: FinanceDao,
+    gemini: GeminiNanoModel? = null,
     onConsultClick: (Transaction) -> Unit = {},
-    onNavigateToSettings: () -> Unit = {}
+    onNavigateToSettings: () -> Unit = {},
+    homeAiText: String = "",
+    onRefreshAi: () -> Unit = {}
 ) {
     val transactions by dao.getAllTransactions().collectAsState(initial = emptyList())
     val assets by dao.getAllAssets().collectAsState(initial = emptyList())
@@ -491,62 +702,92 @@ fun HomeScreen(
                         strokeCap = StrokeCap.Round
                     )
 
-                    // AIによる分析
+                    // 覗き魔 AI によるホーム分析
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    val aiAnalysisText = run {
-                        val spentRatio = if (monthlyBudget > 0) spentThisMonth.toFloat() / monthlyBudget.toFloat() else 0f
-                        val goalRatio = goalProgressRatio
-                        when {
-                            spentRatio > 0.9f ->
-                                "今月の予算をほぼ使い切っています。残りの日数を考えると、支出を大幅に抑える必要があります。"
-                            spentRatio > 0.7f ->
-                                "今月の支出ペースはやや速めです。このまま続くと月末に予算を超える可能性があります。"
-                            spentRatio > 0.4f ->
-                                "支出ペースは概ね順調です。目標達成に向けて引き続き管理を続けましょう。"
-                            spentRatio > 0f ->
-                                "今月の支出は順調にコントロールできています。この調子を維持しましょう！"
-                            else ->
-                                "まだ今月の支出がありません。記録を始めて家計を把握しましょう。"
-                        } + if (hasGoal && goalRatio < 1f) {
-                            val pct = (goalRatio * 100).toInt()
-                            " 目標への達成率は ${pct}% です。"
-                        } else if (hasGoal && goalRatio >= 1f) {
-                            " 🎉 目標達成済みです！"
-                        } else ""
+                    val aiIsReady by (gemini?.isReady ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsState()
+                    val aiIsGenerating by (gemini?.isGenerating ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsState()
+                    val aiIsChecking by (gemini?.isCheckingStatus ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsState()
+
+                    // 表示ステートを判定
+                    val isWaitingForCheck = aiIsChecking && homeAiText.isEmpty()
+                    val isGeneratingNow = aiIsGenerating && homeAiText.isEmpty()
+                    val showProgress = isWaitingForCheck || isGeneratingNow
+                    val statusLabel = when {
+                        isWaitingForCheck -> "AI を確認中..."
+                        isGeneratingNow   -> "分析中..."
+                        else              -> null
                     }
+                    val displayText = homeAiText
 
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(min = 128.dp) // 縦幅を確保
                             .background(Color(0xFFF5F5F5), RoundedCornerShape(10.dp))
                             .padding(12.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.Top) {
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .background(NotionSafeGreen.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
-                                contentAlignment = Alignment.Center
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Face,
-                                    contentDescription = "AI",
-                                    tint = NotionSafeGreen,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .background(NotionSafeGreen.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = "AI",
+                                        tint = NotionSafeGreen,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "覗き魔 AI",
                                     color = NotionSafeGreen,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.weight(1f))
+                                // 手動再生成ボタン（Gemini 利用可能かつ生成・確認中でないとき）
+                                if (aiIsReady && !aiIsGenerating) {
+                                    IconButton(
+                                        onClick = { onRefreshAi() },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "再生成",
+                                            tint = NotionSafeGreen,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            // プログレスバー（確認中 or 生成中）
+                            if (showProgress) {
+                                LinearProgressIndicator(
+                                    modifier = Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)),
+                                    color = NotionSafeGreen,
+                                    trackColor = NotionSafeGreen.copy(alpha = 0.2f)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                            // ステータスラベル or テキスト
+                            if (statusLabel != null) {
                                 Text(
-                                    text = aiAnalysisText,
+                                    text = statusLabel,
+                                    color = NotionTextSecondary.copy(alpha = 0.6f),
+                                    fontSize = 12.sp
+                                )
+                            } else if (displayText.isNotEmpty()) {
+                                Text(
+                                    text = displayText,
                                     color = NotionTextSecondary,
                                     fontSize = 12.sp,
                                     lineHeight = 18.sp
@@ -2434,13 +2675,13 @@ fun ConsultationScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp)
+                .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = Color.White,
-                shadowElevation = 4.dp,
+                shadowElevation = 2.dp,
                 border = BorderStroke(1.dp, NotionBorder)
             ) {
                 Row(
@@ -2559,10 +2800,6 @@ fun ChatBubble(message: ChatMessage) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("覗き魔 AI", color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Surface(color = Color(0xFF2196F3).copy(alpha = 0.15f), shape = RoundedCornerShape(20.dp)) {
-                        Text("難易度：スパルタ", color = Color(0xFFD32F2F), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
-                    }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -2622,7 +2859,12 @@ val currencyVisualTransformation = androidx.compose.ui.text.input.VisualTransfor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BudgetSettingsScreen(dao: FinanceDao) {
+fun BudgetSettingsScreen(
+    dao: FinanceDao,
+    gemini: GeminiNanoModel? = null,
+    goalAiText: String = "",
+    onRefreshAi: () -> Unit = {}
+) {
     val assets by dao.getAllAssets().collectAsState(initial = emptyList())
     val goalSetting by dao.getGoalSetting().collectAsState(initial = null)
     val scope = rememberCoroutineScope()
@@ -2681,24 +2923,6 @@ fun BudgetSettingsScreen(dao: FinanceDao) {
     val monthlyBudget = if (remainingMonths > 0) (totalSpendable / remainingMonths).toLong() else 0L
     val dailyLimit = if (remainingDays > 0) totalSpendable / remainingDays else 0L
 
-    // 難易度診断
-    val difficulty = when {
-        targetAmount == 0L -> "—"
-        dailyLimit < 1000 -> "スパルタ"
-        dailyLimit < 3000 -> "普通"
-        else -> "余裕"
-    }
-    val difficultyColor = when (difficulty) {
-        "スパルタ" -> Color(0xFFE57373); "普通" -> Color(0xFFFFB74D); "余裕" -> NotionSafeGreen
-        else -> NotionTextSecondary
-    }
-    val aiAdvice = when (difficulty) {
-        "スパルタ" -> "今のままだと明日から水だけで生活することになるよ？もう少し現実的な目標にしてみない？"
-        "普通" -> "なかなかいい目標だね。でも油断するとすぐ超えちゃうから、僕がしっかり覗いてあげる。"
-        "余裕" -> "もっと高い目標にしても、僕は覗き続けてあげるよ。余裕があるうちにもっと貯めよう！"
-        else -> "まずは目標貯金額と達成日を入力してみて。"
-    }
-
     val animatedMonthly by animateIntAsState(targetValue = monthlyBudget.toInt(), label = "monthly")
     val animatedDaily by animateIntAsState(targetValue = dailyLimit.toInt(), label = "daily")
     val dateFormatter = remember { SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN) }
@@ -2741,8 +2965,130 @@ fun BudgetSettingsScreen(dao: FinanceDao) {
 
         Spacer(Modifier.height(12.dp))
 
-        // ━━━━━━━━━━━ 設定画面 ━━━━━━━━━━━
-        if (!showResults) {
+        // ━━━━━━━━━━━ 達成画面 ━━━━━━━━━━━
+        if (goalAchieved) {
+            val totalGoalDays = ((targetDateMillis - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(1L)
+            val passedDays = ((System.currentTimeMillis() - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
+            val daysSaved = totalGoalDays - passedDays
+
+            // 1: お祝いカード
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFFFF9E6), RoundedCornerShape(16.dp))
+                    .border(1.5.dp, Color(0xFFFFD54F), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 24.dp, vertical = 20.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    Text("🎉 Congratulations! 🎉", color = Color(0xFFF57F17), fontSize = 20.sp, fontWeight = FontWeight.Black)
+                    Spacer(Modifier.height(6.dp))
+                    val achievementTitle = if (titleText.isNotEmpty()) "「${titleText}」達成おめでとうございます" else "目標達成おめでとうございます"
+                    Text(achievementTitle, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(12.dp))
+                    Text("¥ ${String.format("%,d", targetAmount)}", color = Color(0xFFF57F17), fontSize = 36.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // 2: 実績サマリー
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White, RoundedCornerShape(16.dp))
+                    .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
+                    .padding(18.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // 上段
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                            Text("目標達成", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("Complete!", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                        LinearProgressIndicator(
+                            progress = { 1f },
+                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                            color = Color(0xFF2196F3),
+                            trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
+                            strokeCap = StrokeCap.Round
+                        )
+                    }
+
+                    HorizontalDivider(thickness = 0.5.dp, color = NotionBorder)
+
+                    // 下段
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                            Text("実績期間", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            val progress = if (totalGoalDays > 0) (passedDays * 100 / totalGoalDays).toInt() else 100
+                            Text("$progress%", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                        LinearProgressIndicator(
+                            progress = { if (totalGoalDays > 0) (passedDays.toFloat() / totalGoalDays.toFloat()).coerceIn(0f, 1f) else 1f },
+                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                            color = Color(0xFF2196F3),
+                            trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
+                            strokeCap = StrokeCap.Round
+                        )
+                        if (daysSaved > 0) {
+                            Text("予定より $daysSaved 日早くゴールしました！", color = NotionSafeGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Text("目標の期限通りに達成しました！", color = NotionTextSecondary, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // 3: AIフィードバック
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White, RoundedCornerShape(16.dp))
+                    .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
+                    .padding(18.dp)
+            ) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Box(Modifier.size(36.dp).clip(CircleShape).background(Color.White).border(1.dp, NotionBorder, CircleShape).padding(5.dp), Alignment.Center) {
+                        Image(painterResource(R.drawable.nozokima), null, modifier = Modifier.size(24.dp))
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("覗き魔 AI", color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(if (goalAiText.isNotEmpty()) goalAiText else "目標達成おめでとうございます！これからもあなたの資産を覗き続けますよ。", color = NotionTextPrimary, fontSize = 14.sp, lineHeight = 22.sp)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // 4: 次の目標へボタン
+            Button(
+                onClick = {
+                    titleText = ""
+                    targetAmountText = ""
+                    monthlyIncomeText = ""
+                    targetDateMillis = Calendar.getInstance().apply { add(Calendar.MONTH, 6) }.timeInMillis
+                    startDateMillis = System.currentTimeMillis()
+                    showResults = false
+                    saveGoal()
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen)
+            ) {
+                Icon(Icons.Default.Refresh, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("次の目標を設定する", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+else if (!showResults) {
+            // ━━━━━━━━━━━ 設定画面 ━━━━━━━━━━━
             SectionLabel("目標の定義")
             Spacer(Modifier.height(12.dp))
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -2920,27 +3266,30 @@ fun BudgetSettingsScreen(dao: FinanceDao) {
                 Text("貯蓄を開始する", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
 
-        } else if (goalAchieved) {
-            // ━━━━━━━━━━━ 達成画面 ━━━━━━━━━━━
+        } else {
+            // ━━━━━━━━━━━ 継続画面 ━━━━━━━━━━━
+            val progressRatio = if (targetAmount > 0) (actualTotalAssets.toFloat() / targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
+            val progressPercent = (progressRatio * 100).toInt()
+
             val totalGoalDays = ((targetDateMillis - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(1L)
             val passedDays = ((System.currentTimeMillis() - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
-            val daysSaved = totalGoalDays - passedDays
+            val timeProgressRatio = (passedDays.toFloat() / totalGoalDays.toFloat()).coerceIn(0f, 1f)
 
-            // 1: お祝いカード
+            // 1: 現在の進捗カード (達成画面のUIに合わせる)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFFFFF9E6), RoundedCornerShape(16.dp))
-                    .border(1.5.dp, Color(0xFFFFD54F), RoundedCornerShape(16.dp))
+                    .background(Color(0xFFE3F2FD), RoundedCornerShape(16.dp))
+                    .border(1.5.dp, Color(0xFF2196F3).copy(alpha = 0.5f), RoundedCornerShape(16.dp))
                     .padding(horizontal = 24.dp, vertical = 20.dp)
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text("🎉 Congratulations! 🎉", color = Color(0xFFF57F17), fontSize = 20.sp, fontWeight = FontWeight.Black)
+                    Text("Current Progress", color = Color(0xFF1976D2), fontSize = 16.sp, fontWeight = FontWeight.Black)
                     Spacer(Modifier.height(6.dp))
-                    val achievementTitle = if (titleText.isNotEmpty()) "「${titleText}」達成おめでとうございます" else "目標達成おめでとうございます"
-                    Text(achievementTitle, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    val statusTitle = if (titleText.isNotEmpty()) "「${titleText}」に向かって邁進中" else "目標に向かって邁進中"
+                    Text(statusTitle, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(12.dp))
-                    Text("¥ ${String.format("%,d", targetAmount)}", color = Color(0xFFF57F17), fontSize = 36.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
+                    Text("¥ ${String.format(Locale.JAPAN, "%,d", actualTotalAssets)}", color = Color(0xFF1976D2), fontSize = 36.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
                 }
             }
 
@@ -2955,14 +3304,14 @@ fun BudgetSettingsScreen(dao: FinanceDao) {
                     .padding(18.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    // 上段
+                    // 上段: 目標達成率
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
                             Text("目標達成", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text("Complete!", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("$progressPercent%", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
                         LinearProgressIndicator(
-                            progress = { 1f },
+                            progress = { progressRatio },
                             modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
                             color = Color(0xFF2196F3),
                             trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
@@ -2972,23 +3321,22 @@ fun BudgetSettingsScreen(dao: FinanceDao) {
 
                     HorizontalDivider(thickness = 0.5.dp, color = NotionBorder)
 
-                    // 下段
+                    // 下段: 期間経過率
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                            Text("実績期間", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text("${if (totalGoalDays > 0) (passedDays * 100 / totalGoalDays).toInt() else 100}%", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("期間経過", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("${(timeProgressRatio * 100).toInt()}%", color = NotionSafeGreen, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
                         LinearProgressIndicator(
-                            progress = { if (totalGoalDays > 0) (passedDays.toFloat() / totalGoalDays.toFloat()).coerceIn(0f, 1f) else 1f },
+                            progress = { timeProgressRatio },
                             modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            color = Color(0xFF2196F3),
-                            trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
+                            color = NotionSafeGreen,
+                            trackColor = NotionSafeGreen.copy(alpha = 0.12f),
                             strokeCap = StrokeCap.Round
                         )
-                        if (daysSaved > 0) {
-                            Text("予定より ${daysSaved} 日早くゴールしました！", color = NotionSafeGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        } else {
-                            Text("目標の期限通りに達成しました！", color = NotionTextSecondary, fontSize = 12.sp)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("残り $remainingDays 日", color = NotionTextSecondary, fontSize = 12.sp)
+                            Text("目標 ¥ ${String.format(Locale.JAPAN, "%,d", targetAmount)}", color = NotionTextSecondary, fontSize = 12.sp)
                         }
                     }
                 }
@@ -2996,29 +3344,93 @@ fun BudgetSettingsScreen(dao: FinanceDao) {
 
             Spacer(Modifier.height(12.dp))
 
-            // 3: AIフィードバック
+            // 予算サマリー
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(Color(0xFF2196F3).copy(alpha = 0.06f), RoundedCornerShape(14.dp))
+                        .border(1.dp, Color(0xFF2196F3).copy(alpha = 0.2f), RoundedCornerShape(14.dp))
+                        .padding(16.dp)
+                ) {
+                    Column {
+                        Text("今月の予算", color = Color(0xFF2196F3), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(4.dp))
+                        Text("¥ ${String.format(Locale.JAPAN, "%,d", animatedMonthly)}", color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(NotionSafeGreen.copy(alpha = 0.06f), RoundedCornerShape(14.dp))
+                        .border(1.dp, NotionSafeGreen.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
+                        .padding(16.dp)
+                ) {
+                    Column {
+                        Text("1日の上限", color = NotionSafeGreen, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(4.dp))
+                        Text("¥ ${String.format(Locale.JAPAN, "%,d", animatedDaily)}", color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // 覗き魔 AI カード
+            val aiIsReady by (gemini?.isReady ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsState()
+            val aiIsGenerating by (gemini?.isGenerating ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsState()
+            val aiIsChecking by (gemini?.isCheckingStatus ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsState()
+
+            val isWaiting = aiIsChecking && goalAiText.isEmpty()
+            val isGeneratingNow = aiIsGenerating && goalAiText.isEmpty()
+            val showProgress = isWaiting || isGeneratingNow
+            val statusLabel = when {
+                isWaiting -> "AI を確認中..."
+                isGeneratingNow -> "分析中..."
+                else -> null
+            }
+            val displayText = goalAiText
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 128.dp)
                     .background(Color.White, RoundedCornerShape(16.dp))
                     .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
                     .padding(18.dp)
             ) {
-                Row(verticalAlignment = Alignment.Top) {
-                    Box(Modifier.size(36.dp).clip(CircleShape).background(Color.White).border(1.dp, NotionBorder, CircleShape).padding(5.dp), Alignment.Center) {
-                        Image(painterResource(R.drawable.nozokima), null, modifier = Modifier.size(24.dp))
-                    }
-                    Spacer(Modifier.width(16.dp))
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("覗き魔 AI", color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.width(12.dp))
-                            Surface(color = difficultyColor.copy(alpha = 0.15f), shape = RoundedCornerShape(20.dp)) {
-                                Text("難易度：$difficulty", color = difficultyColor, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .background(NotionSafeGreen.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, "AI", tint = NotionSafeGreen, modifier = Modifier.size(16.dp))
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text("覗き魔 AI", color = NotionSafeGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.weight(1f))
+                        if (aiIsReady && !aiIsGenerating) {
+                            IconButton(onClick = { onRefreshAi() }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Refresh, "再生成", tint = NotionSafeGreen, modifier = Modifier.size(14.dp))
                             }
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Text(aiAdvice, color = NotionTextPrimary, fontSize = 14.sp, lineHeight = 22.sp)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    if (showProgress) {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)),
+                            color = NotionSafeGreen,
+                            trackColor = NotionSafeGreen.copy(alpha = 0.2f)
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
+                    if (statusLabel != null) {
+                        Text(statusLabel, color = NotionTextSecondary.copy(alpha = 0.6f), fontSize = 12.sp)
+                    } else if (displayText.isNotEmpty()) {
+                        Text(displayText, color = NotionTextPrimary, fontSize = 14.sp, lineHeight = 22.sp)
                     }
                 }
             }
