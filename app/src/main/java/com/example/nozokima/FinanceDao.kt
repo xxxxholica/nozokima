@@ -70,4 +70,23 @@ interface FinanceDao {
 
     @Delete
     suspend fun deleteLending(lending: LendingEntity)
+
+    // チャット関連
+    @Query("SELECT * FROM chat_sessions ORDER BY lastMessageAt DESC")
+    fun getAllChatSessions(): Flow<List<ChatSessionEntity>>
+
+    @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
+    fun getMessagesForSession(sessionId: String): Flow<List<ChatMessageEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertChatSession(session: ChatSessionEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertChatMessage(message: ChatMessageEntity)
+
+    @Query("DELETE FROM chat_sessions WHERE id = :sessionId")
+    suspend fun deleteChatSession(sessionId: String)
+
+    @Query("DELETE FROM chat_messages WHERE sessionId = :sessionId")
+    suspend fun deleteMessagesForSession(sessionId: String)
 }
