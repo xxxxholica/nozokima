@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 
 package com.example.nozokima
 
@@ -59,6 +59,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import ui.theme.*
 import androidx.room.Room
 import com.google.mlkit.genai.common.FeatureStatus
@@ -107,7 +108,7 @@ private val assetTypeUiSpecMap = mapOf(
     "電子マネー" to AssetTypeUiSpec(Icons.Outlined.Payments, Color(0xFF00897B)),
     "カード" to AssetTypeUiSpec(Icons.Outlined.CreditCard, Color(0xFFC62828)),
     "貯蓄" to AssetTypeUiSpec(Icons.Outlined.Savings, Color(0xFF00897B)),
-    "投資" to AssetTypeUiSpec(Icons.Outlined.ShowChart, Color(0xFF6A1B9A)),
+    "投資" to AssetTypeUiSpec(Icons.AutoMirrored.Outlined.ShowChart, Color(0xFF6A1B9A)),
     "貸付" to AssetTypeUiSpec(Icons.Outlined.RequestPage, Color(0xFFFB8C00)),
     "カードローン" to AssetTypeUiSpec(Icons.Outlined.CreditCard, Color(0xFFAD1457)),
     "ローン" to AssetTypeUiSpec(Icons.Outlined.AttachMoney, Color(0xFFD84315)),
@@ -165,6 +166,14 @@ class MainActivity : ComponentActivity() {
             var initialAssetCategoryFilter by remember { mutableStateOf<String?>(null) }
             var isGoalKeypadVisible by remember { mutableStateOf(false) }
 
+            val snackbarHostState = remember { SnackbarHostState() }
+            var backupPassword by remember { mutableStateOf("") }
+            var showBackupPasswordDialog by remember { mutableStateOf(false) }
+            var backupMode by remember { mutableStateOf("") } // "export" or "import"
+            var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
+            var showAppLockPasswordDialog by remember { mutableStateOf(false) }
+            var appLockDialogMode by remember { mutableStateOf("set") } // "set", "change", "disable"
+
             val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
             val dao = db.financeDao()
 
@@ -175,8 +184,12 @@ class MainActivity : ComponentActivity() {
             val budgets by dao.getAllBudgets().collectAsState(initial = emptyList())
             val goalSetting by dao.getGoalSetting().collectAsState(initial = null)
             val chatSessions by dao.getAllChatSessions().collectAsState(initial = emptyList())
+            val appSettings by dao.getAppSettings().collectAsState(initial = null)
 
-            // --- AI 状態管理 (Activityレベルで保持してタブ遷移中も継続) ---
+            var isAppLocked by rememberSaveable { mutableStateOf(true) }
+            val showLockScreen = isAppLocked && appSettings?.isAppLockEnabled == true
+
+            // AI 状態管理 (Activityレベルで保持してタブ遷移中も継続) ---
             var homeAiText by rememberSaveable { mutableStateOf("") }
             var goalAiText by rememberSaveable { mutableStateOf("") }
 
@@ -186,6 +199,51 @@ class MainActivity : ComponentActivity() {
             val aiIsReady by gemini.isReady.collectAsState()
             val aiIsGenerating by gemini.isGenerating.collectAsState()
             val scope = rememberCoroutineScope()
+
+            val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+                uri?.let {
+                    scope.launch {
+                        try {
+                            val encryptedData = BackupManager(dao).exportData(backupPassword)
+                            contentResolver.openOutputStream(it)?.use { output ->
+                                output.write(encryptedData.toByteArray())
+                            }
+                            // バックアップ履歴を保存
+                            val fileName = run {
+                                var name: String? = null
+                                if (it.scheme == "content") {
+                                    contentResolver.query(it, null, null, null, null)?.use { cursor ->
+                                        if (cursor.moveToFirst()) {
+                                            val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                                            if (index != -1) name = cursor.getString(index)
+                                        }
+                                    }
+                                }
+                                name ?: it.path?.substringAfterLast('/') ?: "backup_${SimpleDateFormat("yyyyMMdd", Locale.JAPAN).format(Date())}.dat"
+                            }
+                            dao.insertBackupHistory(BackupHistoryEntity(
+                                id = UUID.randomUUID().toString(),
+                                date = System.currentTimeMillis(),
+                                password = backupPassword,
+                                fileName = fileName
+                            ))
+                            snackbarHostState.showSnackbar("データをエクスポートしました")
+                        } catch (e: Exception) {
+                            snackbarHostState.showSnackbar("エクスポートに失敗しました: ${e.message}")
+                        } finally {
+                            backupPassword = ""
+                        }
+                    }
+                }
+            }
+
+            val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                uri?.let {
+                    pendingImportUri = it
+                    backupMode = "import"
+                    showBackupPasswordDialog = true
+                }
+            }
 
             // キーボードの表示状態を監視
             val isKeyboardVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
@@ -219,7 +277,7 @@ class MainActivity : ComponentActivity() {
                 val monthlyBudget = goalMonthlyBudget ?: defaultBudget
 
                 val hasGoal = currentGoal != null && currentGoal.targetAmount > 0 && currentGoal.showResults
-                val goalProgressRatio = if (hasGoal) (currentAssets.toFloat() / currentGoal!!.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
+                val goalProgressRatio = if (hasGoal) (currentAssets.toFloat() / currentGoal.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
 
                 val prompt = buildString {
                     appendLine("あなたは家計管理AIアシスタントです。以下の家計データをもとに日本語で100〜150字の簡潔なアドバイスを1つだけ返してください。余計な挨拶・前置きは不要です。")
@@ -227,7 +285,7 @@ class MainActivity : ComponentActivity() {
                     appendLine("月の予算: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
                     appendLine("予算消化率: ${if (monthlyBudget > 0) "${(spentThisMonth.toFloat() / monthlyBudget * 100).toInt()}%" else "不明"}")
                     appendLine("総資産: ¥${String.format(Locale.JAPAN, "%,d", currentAssets)}")
-                    if (hasGoal) appendLine("貯金目標: ¥${String.format(Locale.JAPAN, "%,d", currentGoal!!.targetAmount)}（達成率${(goalProgressRatio * 100).toInt()}%）")
+                    if (hasGoal) appendLine("貯金目標: ¥${String.format(Locale.JAPAN, "%,d", currentGoal.targetAmount)}（達成率${(goalProgressRatio * 100).toInt()}%）")
                     val recentCats = transactions.take(5).joinToString("、") { it.category }
                     if (recentCats.isNotEmpty()) appendLine("直近の支出カテゴリ: $recentCats")
                 }
@@ -334,9 +392,226 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            // 48時間以上経過したバックアップ履歴を自動削除
+            LaunchedEffect(chatSessions) { // トリガーとして適当なStateを使用
+                val fortyEightHoursAgo = System.currentTimeMillis() - (48 * 60 * 60 * 1000L)
+                dao.deleteOldBackupHistory(fortyEightHoursAgo)
+            }
+
+            // エクスポート画面でのスクリーンショット禁止制御
+            val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
+            DisposableEffect(showBackupPasswordDialog) {
+                if (showBackupPasswordDialog && backupMode == "export") {
+                    activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                }
+                onDispose {
+                    activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                }
+            }
+
+            if (showAppLockPasswordDialog) {
+                var passwordText by remember { mutableStateOf("") }
+                var confirmPasswordText by remember { mutableStateOf("") }
+                var isPasswordVisible by remember { mutableStateOf(false) }
+                val isDisableMode = appLockDialogMode == "disable"
+
+                AlertDialog(
+                    onDismissRequest = { showAppLockPasswordDialog = false },
+                    title = { 
+                        Text(when(appLockDialogMode) {
+                            "set" -> "アプリロックの設定"
+                            "change" -> "パスワードの変更"
+                            else -> "ロックの解除"
+                        })
+                    },
+                    text = {
+                        Column {
+                            if (isDisableMode) {
+                                Text("ロックを解除するには現在のパスワードを入力してください", fontSize = 12.sp, color = NotionTextSecondary)
+                            } else {
+                                Text("4文字以上のパスワードを入力してください", fontSize = 12.sp, color = NotionTextSecondary)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = passwordText,
+                                onValueChange = { passwordText = it },
+                                visualTransformation = if (isPasswordVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password),
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text(if (isDisableMode) "現在のパスワード" else "パスワード") },
+                                singleLine = true,
+                                trailingIcon = {
+                                    IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                                        Icon(
+                                            imageVector = if (isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = null,
+                                            tint = NotionTextSecondary
+                                        )
+                                    }
+                                }
+                            )
+                            if (!isDisableMode) {
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = confirmPasswordText,
+                                    onValueChange = { confirmPasswordText = it },
+                                    visualTransformation = if (isPasswordVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text("パスワード（再入力）") },
+                                    singleLine = true
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            enabled = if (isDisableMode) passwordText.isNotEmpty() else passwordText.length >= 4 && passwordText == confirmPasswordText,
+                            onClick = {
+                                scope.launch {
+                                    if (isDisableMode) {
+                                        if (passwordText == appSettings?.appLockPassword) {
+                                            dao.upsertAppSettings(appSettings!!.copy(isAppLockEnabled = false))
+                                            showAppLockPasswordDialog = false
+                                        } else {
+                                            snackbarHostState.showSnackbar("パスワードが正しくありません")
+                                        }
+                                    } else {
+                                        val currentSettings = appSettings ?: AppSettingsEntity()
+                                        dao.upsertAppSettings(currentSettings.copy(
+                                            appLockPassword = passwordText,
+                                            isAppLockEnabled = true
+                                        ))
+                                        showAppLockPasswordDialog = false
+                                        snackbarHostState.showSnackbar("パスワードを設定しました")
+                                    }
+                                }
+                            }
+                        ) { Text("確定") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showAppLockPasswordDialog = false }) { Text("キャンセル") }
+                    }
+                )
+            }
+
+            if (showBackupPasswordDialog) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val autofillManager = remember { context.getSystemService(android.view.autofill.AutofillManager::class.java) }
+                var passwordText by remember { mutableStateOf(if (backupMode == "export") generateSecurePassword() else "") }
+                var isPasswordVisible by remember { mutableStateOf(backupMode == "export") }
+
+                AlertDialog(
+                    onDismissRequest = { showBackupPasswordDialog = false; backupPassword = "" },
+                    title = { Text(if (backupMode == "export") "バックアップ用パスワード" else "復号パスワード入力") },
+                    text = {
+                        Column {
+                            if (backupMode == "export") {
+                                Text("復旧時に必要なパスワードを自動生成しました。セキュリティのためスクリーンショットは禁止されています。設定の「エクスポート履歴」から48時間以内のみ確認可能です。", fontSize = 12.sp, color = NotionTextSecondary)
+                                Spacer(Modifier.height(16.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(NotionBackground, RoundedCornerShape(12.dp))
+                                        .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
+                                        .padding(20.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = passwordText,
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = NotionTextPrimary,
+                                        letterSpacing = 1.sp
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    TextButton(
+                                        onClick = { passwordText = generateSecurePassword() },
+                                        colors = ButtonDefaults.textButtonColors(contentColor = NotionSafeGreen)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("別のパスワードを生成")
+                                    }
+                                }
+                            } else {
+                                Text("8文字以上のパスワードを入力してください", fontSize = 12.sp, color = NotionTextSecondary)
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = passwordText,
+                                    onValueChange = { passwordText = it },
+                                    visualTransformation = if (isPasswordVisible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+                                    trailingIcon = {
+                                        IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                                            Icon(
+                                                imageVector = if (isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                                contentDescription = null,
+                                                tint = NotionTextSecondary
+                                            )
+                                        }
+                                    },
+                                    singleLine = true,
+                                    label = { Text("パスワード") },
+                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                                        imeAction = androidx.compose.ui.text.input.ImeAction.Done
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            enabled = passwordText.length >= 8,
+                            onClick = {
+                                if (backupMode != "export" && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                    autofillManager?.commit()
+                                }
+                                backupPassword = passwordText
+                                showBackupPasswordDialog = false
+                                if (backupMode == "export") {
+                                    exportLauncher.launch("nozokima_backup_${SimpleDateFormat("yyyyMMdd", Locale.JAPAN).format(Date())}.dat")
+                                } else {
+                                    scope.launch {
+                                        try {
+                                            val uri = pendingImportUri ?: return@launch
+                                            val encryptedData = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                                            if (encryptedData != null) {
+                                                BackupManager(dao).importData(encryptedData, backupPassword)
+                                                snackbarHostState.showSnackbar("データをインポートしました")
+                                            }
+                                        } catch (e: Exception) {
+                                            snackbarHostState.showSnackbar("インポートに失敗しました。パスワードが違うか、ファイルが壊れています。")
+                                        } finally {
+                                            backupPassword = ""
+                                            pendingImportUri = null
+                                        }
+                                    }
+                                }
+                            }
+                        ) { Text("OK") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showBackupPasswordDialog = false; backupPassword = ""; pendingImportUri = null }) { Text("キャンセル") }
+                    }
+                )
+            }
+
             Surface(modifier = Modifier.fillMaxSize(), color = NotionBackground) {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    ModalNavigationDrawer(
+                if (showLockScreen) {
+                    AppLockScreen(
+                        correctPassword = appSettings?.appLockPassword ?: "",
+                        onUnlock = { isAppLocked = false }
+                    )
+                } else {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        ModalNavigationDrawer(
                         drawerState = drawerState,
                         gesturesEnabled = selectedTab == 3,
                         drawerContent = {
@@ -386,7 +661,7 @@ class MainActivity : ComponentActivity() {
                                                     selectedTab = 3
                                                 },
                                                 onNavigateToSettings = {
-                                                    selectedTab = 4
+                                                    selectedTab = 5
                                                 },
                                                 onCategoryClick = { category ->
                                                     initialAssetCategoryFilter = category
@@ -440,15 +715,47 @@ class MainActivity : ComponentActivity() {
                                                 goalAiText = goalAiText,
                                                 onRefreshAi = { triggerGoalAnalysis() },
                                                 isKeypadVisible = isGoalKeypadVisible,
-                                                onKeypadVisibilityChange = { isGoalKeypadVisible = it }
+                                                onKeypadVisibilityChange = { isGoalKeypadVisible = it },
+                                                onBack = null
+                                            )
+                                        }
+                                        5 -> Box(Modifier.padding(innerPadding)) {
+                                            GeneralSettingsScreen(
+                                                dao = dao,
+                                                appLockEnabled = appSettings?.isAppLockEnabled == true,
+                                                onToggleAppLock = { enabled ->
+                                                    if (enabled) {
+                                                        appLockDialogMode = "set"
+                                                        showAppLockPasswordDialog = true
+                                                    } else {
+                                                        appLockDialogMode = "disable"
+                                                        showAppLockPasswordDialog = true
+                                                    }
+                                                },
+                                                onChangePassword = {
+                                                    appLockDialogMode = "change"
+                                                    showAppLockPasswordDialog = true
+                                                },
+                                                onExportClick = {
+                                                    backupMode = "export"
+                                                    showBackupPasswordDialog = true
+                                                },
+                                                onImportClick = {
+                                                    importLauncher.launch(arrayOf("*/*"))
+                                                },
+                                                onBack = {
+                                                    selectedTab = 0
+                                                }
                                             )
                                         }
                                     }
                                 }
                             }
+                            
+                            SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp))
 
                             // FloatingNavBarをDrawerの下（およびそのScrimの下）に配置
-                            if (!isKeyboardVisible && !isGoalKeypadVisible) {
+                            if (!isKeyboardVisible && !isGoalKeypadVisible && selectedTab < 5) {
                                 FloatingNavBar(
                                     selectedTab = selectedTab,
                                     onTabSelected = { index ->
@@ -463,6 +770,67 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+}
+
+// --- アプリロック画面 ---
+
+@Composable
+fun AppLockScreen(
+    correctPassword: String,
+    onUnlock: () -> Unit
+) {
+    var inputPassword by remember { mutableStateOf("") }
+    var isError by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(NotionBackground)
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Lock,
+            contentDescription = null,
+            tint = NotionSafeGreen,
+            modifier = Modifier.size(64.dp)
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = "アプリはロックされています",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = NotionTextPrimary
+        )
+        Spacer(modifier = Modifier.height(32.dp))
+        
+        OutlinedTextField(
+            value = inputPassword,
+            onValueChange = { 
+                inputPassword = it
+                isError = false
+                if (it == correctPassword) {
+                    onUnlock()
+                }
+            },
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password),
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("パスワードを入力") },
+            isError = isError,
+            singleLine = true
+        )
+        
+        if (isError) {
+            Text(
+                text = "パスワードが正しくありません",
+                color = Color.Red,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 8.dp)
+            )
         }
     }
 }
@@ -622,7 +990,8 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
                 text = greeting,
@@ -631,6 +1000,13 @@ fun HomeScreen(
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.5).sp
             )
+            IconButton(onClick = onNavigateToSettings) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings",
+                    tint = NotionTextSecondary
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -668,7 +1044,7 @@ fun HomeScreen(
                             }
                         }
                         Text(
-                            text = if (isAssetsVisible) "¥ ${String.format("%,d", currentAssets)}" else "¥ ••••••••",
+                            text = if (isAssetsVisible) "¥ ${String.format(Locale.JAPAN, "%,d", currentAssets)}" else "¥ ••••••••",
                             color = NotionTextPrimary,
                             fontSize = 32.sp,
                             fontWeight = FontWeight.Bold,
@@ -690,7 +1066,7 @@ fun HomeScreen(
                     spentRatio > 0.5f -> Color(0xFFFFB74D)  // 黄：50%超
                     else -> NotionSafeGreen
                 }
-                
+
                 Column(modifier = Modifier.fillMaxWidth()) {
                     // 上段：短期予算バー
                     Row(
@@ -1347,7 +1723,7 @@ fun InputScreen(
             ) {
                 if (selectedMode == "回収") {
                     InputTile(
-                        icon = Icons.Default.List,
+                        icon = Icons.AutoMirrored.Filled.List,
                         label = "対象の貸付",
                         value = selectedLending?.let { "${it.personName} (${it.memo.ifBlank { "無題" }})" } ?: "選択してください",
                         onClick = { showLendingSheet = true },
@@ -1578,7 +1954,7 @@ fun InputScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(asset.name)
-                            Text("¥ ${String.format("%,d", asset.amount)}")
+                            Text("¥ ${String.format(Locale.JAPAN, "%,d", asset.amount)}")
                         }
                     }
                 }
@@ -1921,6 +2297,23 @@ fun evaluateExpression(expression: String): Int {
     } catch (e: Exception) {
         0
     }
+}
+
+private fun calculatePasswordStrength(password: String): Float {
+    if (password.isEmpty()) return 0f
+    var score = 0
+    if (password.length >= 8) score++
+    if (password.length >= 12) score++
+    if (password.any { it.isUpperCase() }) score++
+    if (password.any { it.isLowerCase() }) score++
+    if (password.any { it.isDigit() }) score++
+    if (password.any { !it.isLetterOrDigit() }) score++
+    return score.toFloat() / 6f
+}
+
+private fun generateSecurePassword(): String {
+    val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+"
+    return (1..16).map { chars.random() }.joinToString("")
 }
 
 // --- 3. 資産状況画面 ---
@@ -3253,6 +3646,298 @@ val currencyVisualTransformation = androidx.compose.ui.text.input.VisualTransfor
     androidx.compose.ui.text.input.TransformedText(androidx.compose.ui.text.AnnotatedString(formatted), offsetMapping)
 }
 
+@Composable
+fun GeneralSettingsScreen(
+    dao: FinanceDao,
+    appLockEnabled: Boolean,
+    onToggleAppLock: (Boolean) -> Unit,
+    onChangePassword: () -> Unit,
+    onExportClick: () -> Unit,
+    onImportClick: () -> Unit,
+    onBack: () -> Unit
+) {
+    var showBackupHistory by remember { mutableStateOf(false) }
+
+    BackHandler {
+        if (showBackupHistory) {
+            showBackupHistory = false
+        } else {
+            onBack()
+        }
+    }
+
+    if (showBackupHistory) {
+        BackupHistoryScreen(
+            dao = dao,
+            onBack = { showBackupHistory = false }
+        )
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(NotionBackground)
+        ) {
+            ScreenHeader(
+                title = "設定",
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
+                    }
+                }
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                Text("セキュリティ", color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+                
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, NotionBorder)
+                ) {
+                    Column {
+                        ListItem(
+                            headlineContent = { Text("アプリロック", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+                            trailingContent = {
+                                Switch(
+                                    checked = appLockEnabled,
+                                    onCheckedChange = { onToggleAppLock(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = NotionSafeGreen,
+                                        uncheckedThumbColor = Color.White,
+                                        uncheckedTrackColor = NotionBorder
+                                    )
+                                )
+                            },
+                            leadingContent = { 
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .background(NotionSafeGreen.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Lock, null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        )
+                        if (appLockEnabled) {
+                            HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                            ListItem(
+                                headlineContent = { Text("パスワードの変更", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+                                leadingContent = { Spacer(modifier = Modifier.width(40.dp)) },
+                                modifier = Modifier.clickable { onChangePassword() }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text("データ管理", color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+                
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, NotionBorder)
+                ) {
+                    Column {
+                        ListItem(
+                            headlineContent = { Text("データのエクスポート", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+                            supportingContent = { Text("現在のデータを暗号化して保存します", fontSize = 12.sp) },
+                            leadingContent = { 
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .background(NotionSafeGreen.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Upload, null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
+                                }
+                            },
+                            modifier = Modifier.clickable { onExportClick() }
+                        )
+                        HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                        ListItem(
+                            headlineContent = { Text("データのインポート", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+                            supportingContent = { Text("バックアップファイルからデータを復旧します", fontSize = 12.sp) },
+                            leadingContent = { 
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .background(NotionSafeGreen.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Download, null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
+                                }
+                            },
+                            modifier = Modifier.clickable { onImportClick() }
+                        )
+                        HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                        ListItem(
+                            headlineContent = { Text("エクスポート履歴", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+                            supportingContent = { Text("過去にエクスポートしたパスワードを確認します", fontSize = 12.sp) },
+                            leadingContent = { 
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .background(NotionSafeGreen.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.History, null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
+                                }
+                            },
+                            modifier = Modifier.clickable { showBackupHistory = true }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BackupHistoryScreen(
+    dao: FinanceDao,
+    onBack: () -> Unit
+) {
+    val history by dao.getAllBackupHistory().collectAsState(initial = emptyList())
+    val scope = rememberCoroutineScope()
+    var historyToDelete by remember { mutableStateOf<BackupHistoryEntity?>(null) }
+
+    if (historyToDelete != null) {
+        DeleteConfirmDialog(
+            text = "このバックアップ履歴を削除しますか？\n（ファイル自体は削除されません）",
+            onDismiss = { historyToDelete = null },
+            onConfirm = {
+                scope.launch {
+                    historyToDelete?.let { dao.deleteBackupHistory(it) }
+                    historyToDelete = null
+                }
+            }
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(NotionBackground)
+    ) {
+        ScreenHeader(
+            title = "エクスポート履歴",
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
+                }
+            }
+        )
+
+        if (history.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("履歴はありません", color = NotionTextSecondary)
+            }
+        } else {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
+                        .background(Color.White, RoundedCornerShape(12.dp))
+                ) {
+                    Column {
+                        history.forEachIndexed { index, item ->
+                            val haptic = LocalHapticFeedback.current
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .combinedClickable(
+                                        onClick = { },
+                                        onLongClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            historyToDelete = item
+                                        }
+                                    )
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .background(NotionSafeGreen.copy(alpha = 0.1f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Lock,
+                                        contentDescription = null,
+                                        tint = NotionSafeGreen,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                                
+                                Spacer(modifier = Modifier.width(16.dp))
+                                
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = item.fileName,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = NotionTextPrimary,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f).padding(horizontal = 10.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = SimpleDateFormat("MM/dd HH:mm", Locale.JAPAN).format(Date(item.date)),
+                                            fontSize = 11.sp,
+                                            color = NotionTextSecondary
+                                        )
+                                    }
+                                    
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(NotionBackground, RoundedCornerShape(6.dp))
+                                    ) {
+                                        Text(
+                                            text = item.password,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = NotionTextPrimary,
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                            letterSpacing = 0.5.sp,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            if (index < history.lastIndex) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    thickness = 0.5.dp,
+                                    color = NotionBorder
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BudgetSettingsScreen(
@@ -3261,7 +3946,8 @@ fun BudgetSettingsScreen(
     goalAiText: String = "",
     onRefreshAi: () -> Unit = {},
     isKeypadVisible: Boolean = false,
-    onKeypadVisibilityChange: (Boolean) -> Unit = {}
+    onKeypadVisibilityChange: (Boolean) -> Unit = {},
+    onBack: (() -> Unit)? = null
 ) {
     val assets by dao.getAllAssets().collectAsState(initial = emptyList())
     val lendings by dao.getAllLendings().collectAsState(initial = emptyList())
@@ -3356,6 +4042,13 @@ fun BudgetSettingsScreen(
                 goalAchieved -> "目標達成"
                 showResults -> "目標経過"
                 else -> "目標設定"
+            },
+            navigationIcon = onBack?.let {
+                {
+                    IconButton(onClick = it) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
+                    }
+                }
             }
         )
 
@@ -3367,133 +4060,18 @@ fun BudgetSettingsScreen(
 
         // ━━━━━━━━━━━ 達成画面 ━━━━━━━━━━━
         if (goalAchieved) {
-            val totalGoalDays = ((targetDateMillis - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(1L)
-            val passedDays = ((System.currentTimeMillis() - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
-            val daysSaved = totalGoalDays - passedDays
-
-            // 1: お祝いカード
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFFFFF9E6), RoundedCornerShape(16.dp))
-                    .border(1.5.dp, Color(0xFFFFD54F), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 24.dp, vertical = 20.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text("🎉 Congratulations! 🎉", color = Color(0xFFF57F17), fontSize = 20.sp, fontWeight = FontWeight.Black)
-                    Spacer(Modifier.height(6.dp))
-                    val achievementTitle = if (titleText.isNotEmpty()) "「${titleText}」達成おめでとうございます" else "目標達成おめでとうございます"
-                    Text(achievementTitle, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(12.dp))
-                    Text("¥ ${String.format("%,d", targetAmount)}", color = Color(0xFFF57F17), fontSize = 36.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // 2: 実績サマリー
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White, RoundedCornerShape(16.dp))
-                    .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
-                    .padding(18.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    // 上段
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                            Text("目標達成", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text("Complete!", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        }
-                        LinearProgressIndicator(
-                            progress = { 1f },
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            color = Color(0xFF2196F3),
-                            trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
-                            strokeCap = StrokeCap.Round
-                        )
-                    }
-
-                    HorizontalDivider(thickness = 0.5.dp, color = NotionBorder)
-
-                    // 下段
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                            Text("実績期間", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            val progress = if (totalGoalDays > 0) (passedDays * 100 / totalGoalDays).toInt() else 100
-                            Text("$progress%", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        }
-                        LinearProgressIndicator(
-                            progress = { if (totalGoalDays > 0) (passedDays.toFloat() / totalGoalDays.toFloat()).coerceIn(0f, 1f) else 1f },
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            color = Color(0xFF2196F3),
-                            trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
-                            strokeCap = StrokeCap.Round
-                        )
-                        if (daysSaved > 0) {
-                            Text("予定より $daysSaved 日早くゴールしました！", color = NotionSafeGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        } else {
-                            Text("目標の期限通りに達成しました！", color = NotionTextSecondary, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // 3: AIフィードバック
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 128.dp)
-                    .background(Color.White, RoundedCornerShape(16.dp))
-                    .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
-                    .padding(18.dp)
-            ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .background(NotionSafeGreen.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.AutoAwesome, "AI", tint = NotionSafeGreen, modifier = Modifier.size(16.dp))
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text("覗き魔 AI", color = NotionSafeGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.weight(1f))
-                        if (aiIsReady && !aiIsGenerating) {
-                            IconButton(onClick = { onRefreshAi() }, modifier = Modifier.size(24.dp)) {
-                                Icon(Icons.Default.Refresh, "再生成", tint = NotionSafeGreen, modifier = Modifier.size(14.dp))
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    if (showAiProgress) {
-                        LinearProgressIndicator(
-                            modifier = Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)),
-                            color = NotionSafeGreen,
-                            trackColor = NotionSafeGreen.copy(alpha = 0.2f)
-                        )
-                        Spacer(Modifier.height(12.dp))
-                    }
-                    if (aiStatusLabel != null) {
-                        Text(aiStatusLabel, color = NotionTextSecondary.copy(alpha = 0.6f), fontSize = 12.sp)
-                    } else if (goalAiText.isNotEmpty()) {
-                        Text(goalAiText, color = NotionTextPrimary, fontSize = 14.sp, lineHeight = 22.sp)
-                    } else {
-                        Text("目標達成おめでとうございます！これからもあなたの資産を覗き続けますよ。", color = NotionTextPrimary, fontSize = 14.sp, lineHeight = 22.sp)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            // 4: 次の目標へボタン
-            Button(
-                onClick = {
+            GoalAchievedView(
+                titleText = titleText,
+                targetAmount = targetAmount,
+                startDateMillis = startDateMillis,
+                targetDateMillis = targetDateMillis,
+                aiIsReady = aiIsReady,
+                aiIsGenerating = aiIsGenerating,
+                showAiProgress = showAiProgress,
+                aiStatusLabel = aiStatusLabel,
+                goalAiText = goalAiText,
+                onRefreshAi = onRefreshAi,
+                onResetGoal = {
                     titleText = ""
                     targetAmountText = ""
                     monthlyIncomeText = ""
@@ -3501,333 +4079,49 @@ fun BudgetSettingsScreen(
                     startDateMillis = System.currentTimeMillis()
                     showResults = false
                     saveGoal()
-                },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen)
-            ) {
-                Icon(Icons.Default.Refresh, null, tint = Color.White, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("次の目標を設定する", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-else if (!showResults) {
+                }
+            )
+        } else if (!showResults) {
             // ━━━━━━━━━━━ 設定画面 ━━━━━━━━━━━
-            SectionLabel("目標の定義")
-            Spacer(Modifier.height(12.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // 目標タイトル
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, NotionBorder)
-                ) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
-                            Icon(Icons.Default.Flag, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("目標タイトル", fontSize = 12.sp, color = NotionTextSecondary)
-                            androidx.compose.foundation.text.BasicTextField(
-                                value = titleText,
-                                onValueChange = { titleText = it; saveGoal() },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                textStyle = androidx.compose.ui.text.TextStyle(color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
-                                decorationBox = { inner ->
-                                    if (titleText.isEmpty()) Text("旅行のための貯金", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
-                                    inner()
-                                },
-                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { saveGoal() })
-                            )
-                        }
-                    }
-                }
-
-                // 目標貯金額
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, NotionBorder)
-                ) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
-                            Icon(Icons.Default.Star, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f).clickable { goalKeypadTarget = "amount"; onKeypadVisibilityChange(true) }) {
-                            Text("目標貯金額", fontSize = 12.sp, color = NotionTextSecondary)
-                            Text(
-                                text = if (targetAmountText.isEmpty()) "¥ " else "¥ ${String.format(Locale.JAPAN, "%,d", targetAmountText.toLongOrNull() ?: 0L)}",
-                                color = if (targetAmountText.isEmpty()) NotionSafeGreen.copy(alpha = 0.5f) else NotionSafeGreen,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-
-                // 月収
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, NotionBorder)
-                ) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
-                            Icon(Icons.AutoMirrored.Filled.TrendingUp, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f).clickable { goalKeypadTarget = "income"; onKeypadVisibilityChange(true) }) {
-                            Text("月平均の手取り収入", fontSize = 12.sp, color = NotionTextSecondary)
-                            Text(
-                                text = if (monthlyIncomeText.isEmpty()) "¥ " else "¥ ${String.format(Locale.JAPAN, "%,d", monthlyIncomeText.toLongOrNull() ?: 0L)}",
-                                color = if (monthlyIncomeText.isEmpty()) NotionSafeGreen.copy(alpha = 0.5f) else NotionSafeGreen,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-
-                // 目標達成日
-                InputTile(
-                    icon = Icons.Default.CalendarMonth,
-                    label = "目標達成日",
-                    value = dateFormatter.format(java.util.Date(targetDateMillis)),
-                    onClick = { showDatePicker = true },
-                    accentColor = NotionSafeGreen
-                )
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            // シミュレーション結果ブロック
-            SectionLabel("シミュレーション結果")
-            Spacer(Modifier.height(12.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // 現在の保有資産
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, NotionBorder)
-                ) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = Color(0xFFFFB74D).copy(alpha = 0.08f)) {
-                            Icon(Icons.Default.AccountBalance, null, tint = Color(0xFFFFB74D), modifier = Modifier.padding(10.dp))
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("現在の保有資産", fontSize = 12.sp, color = NotionTextSecondary)
-                            Text("¥ ${String.format("%,d", actualTotalAssets)}", color = Color(0xFFFFB74D), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                if (canStart) {
-                    // 許容支出（合計）
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        color = Color.White,
-                        border = BorderStroke(1.dp, NotionBorder)
-                    ) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = Color(0xFF2196F3).copy(alpha = 0.08f)) {
-                                Icon(Icons.Default.Wallet, null, tint = Color(0xFF2196F3), modifier = Modifier.padding(10.dp))
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("合計の許容支出", fontSize = 12.sp, color = NotionTextSecondary)
-                                Text("¥ ${String.format("%,d", totalSpendable)}", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
-                    // 月の予算
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        color = Color.White,
-                        border = BorderStroke(1.dp, NotionBorder)
-                    ) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = Color(0xFF2196F3).copy(alpha = 0.08f)) {
-                                Icon(Icons.Default.CalendarMonth, null, tint = Color(0xFF2196F3), modifier = Modifier.padding(10.dp))
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("月の予算", fontSize = 12.sp, color = NotionTextSecondary)
-                                Text("¥ ${String.format("%,d", monthlyBudget)}", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            // 貯蓄を開始するボタン
-            Button(
-                onClick = {
+            GoalSetupView(
+                titleText = titleText,
+                onTitleChange = { titleText = it; saveGoal() },
+                targetAmountText = targetAmountText,
+                onAmountClick = { goalKeypadTarget = "amount"; onKeypadVisibilityChange(true) },
+                monthlyIncomeText = monthlyIncomeText,
+                onIncomeClick = { goalKeypadTarget = "income"; onKeypadVisibilityChange(true) },
+                targetDateMillis = targetDateMillis,
+                onDateClick = { showDatePicker = true },
+                dateFormatter = dateFormatter,
+                canStart = canStart,
+                actualTotalAssets = actualTotalAssets,
+                totalSpendable = totalSpendable,
+                monthlyBudget = monthlyBudget,
+                onStart = {
                     showResults = true
                     if (startDateMillis == 0L || goalSetting?.startDateMillis?.let { it == 0L } == true) {
                         startDateMillis = System.currentTimeMillis()
                     }
                     saveGoal()
-                },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                enabled = canStart,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen, disabledContainerColor = NotionBorder)
-            ) {
-                Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("貯蓄を開始する", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            }
-
+                }
+            )
         } else {
             // ━━━━━━━━━━━ 継続画面 ━━━━━━━━━━━
-            val progressRatio = if (targetAmount > 0) (actualTotalAssets.toFloat() / targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
-            val progressPercent = (progressRatio * 100).toInt()
-
-            val totalGoalDays = ((targetDateMillis - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(1L)
-            val passedDays = ((System.currentTimeMillis() - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
-            val timeProgressRatio = (passedDays.toFloat() / totalGoalDays.toFloat()).coerceIn(0f, 1f)
-
-            // 1: 目標と現在の資産
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFFE3F2FD).copy(alpha = 0.5f), RoundedCornerShape(16.dp))
-                    .border(1.dp, Color(0xFF2196F3).copy(alpha = 0.2f), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 24.dp, vertical = 20.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text("Current Progress🏃", color = Color(0xFF1976D2), fontSize = 16.sp, fontWeight = FontWeight.Black)
-                    Spacer(Modifier.height(6.dp))
-                    val statusTitle = if (titleText.isNotEmpty()) "「${titleText}」に向かって貯金中" else "目標に向かって貯金中"
-                    Text(statusTitle, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(12.dp))
-                    Text("¥ ${String.format(Locale.JAPAN, "%,d", actualTotalAssets)}", color = Color(0xFF1976D2), fontSize = 32.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // 2: 実績サマリー
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White, RoundedCornerShape(16.dp))
-                    .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
-                    .padding(18.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    // 上段: 目標達成率
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                            Text("目標達成", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text("$progressPercent%", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        }
-                        LinearProgressIndicator(
-                            progress = { progressRatio },
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            color = Color(0xFF2196F3),
-                            trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
-                            strokeCap = StrokeCap.Round
-                        )
-                    }
-
-                    HorizontalDivider(thickness = 0.5.dp, color = NotionBorder)
-
-                    // 下段: 期間経過率
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                            Text("期間経過", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text("${(timeProgressRatio * 100).toInt()}%", color = NotionSafeGreen, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        }
-                        LinearProgressIndicator(
-                            progress = { timeProgressRatio },
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            color = NotionSafeGreen,
-                            trackColor = NotionSafeGreen.copy(alpha = 0.12f),
-                            strokeCap = StrokeCap.Round
-                        )
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("残り $remainingDays 日", color = NotionTextSecondary, fontSize = 12.sp)
-                            Text("目標 ¥ ${String.format(Locale.JAPAN, "%,d", targetAmount)}", color = NotionTextSecondary, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // 覗き魔 AI カード
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 128.dp)
-                    .background(Color.White, RoundedCornerShape(16.dp))
-                    .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
-                    .padding(18.dp)
-            ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .background(NotionSafeGreen.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.AutoAwesome, "AI", tint = NotionSafeGreen, modifier = Modifier.size(16.dp))
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text("覗き魔 AI", color = NotionSafeGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.weight(1f))
-                        if (aiIsReady && !aiIsGenerating) {
-                            IconButton(onClick = { onRefreshAi() }, modifier = Modifier.size(24.dp)) {
-                                Icon(Icons.Default.Refresh, "再生成", tint = NotionSafeGreen, modifier = Modifier.size(14.dp))
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    if (showAiProgress) {
-                        LinearProgressIndicator(
-                            modifier = Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)),
-                            color = NotionSafeGreen,
-                            trackColor = NotionSafeGreen.copy(alpha = 0.2f)
-                        )
-                        Spacer(Modifier.height(12.dp))
-                    }
-                    if (aiStatusLabel != null) {
-                        Text(aiStatusLabel, color = NotionTextSecondary.copy(alpha = 0.6f), fontSize = 12.sp)
-                    } else if (goalAiText.isNotEmpty()) {
-                        Text(goalAiText, color = NotionTextPrimary, fontSize = 14.sp, lineHeight = 22.sp)
-                    }
-                }
-            }
-        }
-
-    if (showResults && !goalAchieved) {
-            Spacer(Modifier.height(24.dp))
-            OutlinedButton(
-                onClick = { showResults = false; saveGoal() },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, NotionBorder)
-            ) {
-                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp), tint = NotionTextSecondary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("設定を変更", fontSize = 14.sp, color = NotionTextSecondary)
-            }
+            GoalProgressView(
+                titleText = titleText,
+                actualTotalAssets = actualTotalAssets,
+                targetAmount = targetAmount,
+                startDateMillis = startDateMillis,
+                targetDateMillis = targetDateMillis,
+                remainingDays = remainingDays,
+                aiIsReady = aiIsReady,
+                aiIsGenerating = aiIsGenerating,
+                showAiProgress = showAiProgress,
+                aiStatusLabel = aiStatusLabel,
+                goalAiText = goalAiText,
+                onRefreshAi = onRefreshAi,
+                onEditClick = { showResults = false; saveGoal() }
+            )
         }
 
         Spacer(Modifier.height(40.dp))
@@ -3921,6 +4215,483 @@ else if (!showResults) {
 
 } // end Box
 } // end BudgetSettingsScreen
+
+@Composable
+fun GoalAchievedView(
+    titleText: String,
+    targetAmount: Long,
+    startDateMillis: Long,
+    targetDateMillis: Long,
+    aiIsReady: Boolean,
+    aiIsGenerating: Boolean,
+    showAiProgress: Boolean,
+    aiStatusLabel: String?,
+    goalAiText: String,
+    onRefreshAi: () -> Unit,
+    onResetGoal: () -> Unit
+) {
+    val totalGoalDays = ((targetDateMillis - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(1L)
+    val passedDays = ((System.currentTimeMillis() - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
+    val daysSaved = totalGoalDays - passedDays
+
+    // 1: お祝いカード
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFFFF9E6), RoundedCornerShape(16.dp))
+            .border(1.5.dp, Color(0xFFFFD54F), RoundedCornerShape(16.dp))
+            .padding(horizontal = 24.dp, vertical = 20.dp)
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+            Text("🎉 Congratulations! 🎉", color = Color(0xFFF57F17), fontSize = 20.sp, fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(6.dp))
+            val achievementTitle = if (titleText.isNotEmpty()) "「${titleText}」達成おめでとうございます" else "目標達成おめでとうございます"
+            Text(achievementTitle, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(12.dp))
+            Text("¥ ${String.format(Locale.JAPAN, "%,d", targetAmount)}", color = Color(0xFFF57F17), fontSize = 36.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
+        }
+    }
+
+    Spacer(Modifier.height(12.dp))
+
+    // 2: 実績サマリー
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White, RoundedCornerShape(16.dp))
+            .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
+            .padding(18.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            // 上段
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                    Text("目標達成", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("Complete!", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+                LinearProgressIndicator(
+                    progress = { 1f },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = Color(0xFF2196F3),
+                    trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
+                    strokeCap = StrokeCap.Round
+                )
+            }
+
+            HorizontalDivider(thickness = 0.5.dp, color = NotionBorder)
+
+            // 下段
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                    Text("実績期間", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    val progress = if (totalGoalDays > 0) (passedDays * 100 / totalGoalDays).toInt() else 100
+                    Text("$progress%", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+                LinearProgressIndicator(
+                    progress = { if (totalGoalDays > 0) (passedDays.toFloat() / totalGoalDays.toFloat()).coerceIn(0f, 1f) else 1f },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = Color(0xFF2196F3),
+                    trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
+                    strokeCap = StrokeCap.Round
+                )
+                if (daysSaved > 0) {
+                    Text("予定より $daysSaved 日早くゴールしました！", color = NotionSafeGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                } else {
+                    Text("目標の期限通りに達成しました！", color = NotionTextSecondary, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+
+    Spacer(Modifier.height(12.dp))
+
+    // 3: AIフィードバック
+    AiAdvisorCard(
+        aiIsReady = aiIsReady,
+        aiIsGenerating = aiIsGenerating,
+        showAiProgress = showAiProgress,
+        aiStatusLabel = aiStatusLabel,
+        goalAiText = goalAiText,
+        onRefreshAi = onRefreshAi,
+        defaultText = "目標達成おめでとうございます！これからもあなたの資産を覗き続けますよ。"
+    )
+
+    Spacer(Modifier.height(24.dp))
+
+    // 4: 次の目標へボタン
+    Button(
+        onClick = onResetGoal,
+        modifier = Modifier.fillMaxWidth().height(52.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen)
+    ) {
+        Icon(Icons.Default.Refresh, null, tint = Color.White, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("次の目標を設定する", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun GoalSetupView(
+    titleText: String,
+    onTitleChange: (String) -> Unit,
+    targetAmountText: String,
+    onAmountClick: () -> Unit,
+    monthlyIncomeText: String,
+    onIncomeClick: () -> Unit,
+    targetDateMillis: Long,
+    onDateClick: () -> Unit,
+    dateFormatter: SimpleDateFormat,
+    canStart: Boolean,
+    actualTotalAssets: Long,
+    totalSpendable: Long,
+    monthlyBudget: Long,
+    onStart: () -> Unit
+) {
+    SectionLabel("目標の定義")
+    Spacer(Modifier.height(12.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // 目標タイトル
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = Color.White,
+            border = BorderStroke(1.dp, NotionBorder)
+        ) {
+            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
+                    Icon(Icons.Default.Flag, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("目標タイトル", fontSize = 12.sp, color = NotionTextSecondary)
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = titleText,
+                        onValueChange = onTitleChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                        decorationBox = { inner ->
+                            if (titleText.isEmpty()) Text("旅行のための貯金", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
+                            inner()
+                        },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done)
+                    )
+                }
+            }
+        }
+
+        // 目標貯金額
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = Color.White,
+            border = BorderStroke(1.dp, NotionBorder)
+        ) {
+            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
+                    Icon(Icons.Default.Star, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f).clickable { onAmountClick() }) {
+                    Text("目標貯金額", fontSize = 12.sp, color = NotionTextSecondary)
+                    Text(
+                        text = if (targetAmountText.isEmpty()) "¥ " else "¥ ${String.format(Locale.JAPAN, "%,d", targetAmountText.toLongOrNull() ?: 0L)}",
+                        color = if (targetAmountText.isEmpty()) NotionSafeGreen.copy(alpha = 0.5f) else NotionSafeGreen,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // 月収
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = Color.White,
+            border = BorderStroke(1.dp, NotionBorder)
+        ) {
+            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
+                    Icon(Icons.AutoMirrored.Filled.TrendingUp, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f).clickable { onIncomeClick() }) {
+                    Text("月平均の手取り収入", fontSize = 12.sp, color = NotionTextSecondary)
+                    Text(
+                        text = if (monthlyIncomeText.isEmpty()) "¥ " else "¥ ${String.format(Locale.JAPAN, "%,d", monthlyIncomeText.toLongOrNull() ?: 0L)}",
+                        color = if (monthlyIncomeText.isEmpty()) NotionSafeGreen.copy(alpha = 0.5f) else NotionSafeGreen,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // 目標達成日
+        InputTile(
+            icon = Icons.Default.CalendarMonth,
+            label = "目標達成日",
+            value = dateFormatter.format(java.util.Date(targetDateMillis)),
+            onClick = onDateClick,
+            accentColor = NotionSafeGreen
+        )
+    }
+
+    Spacer(Modifier.height(24.dp))
+
+    // シミュレーション結果ブロック
+    SectionLabel("シミュレーション結果")
+    Spacer(Modifier.height(12.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // 現在の保有資産
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = Color.White,
+            border = BorderStroke(1.dp, NotionBorder)
+        ) {
+            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = Color(0xFFFFB74D).copy(alpha = 0.08f)) {
+                    Icon(Icons.Default.AccountBalance, null, tint = Color(0xFFFFB74D), modifier = Modifier.padding(10.dp))
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("現在の保有資産", fontSize = 12.sp, color = NotionTextSecondary)
+                    Text("¥ ${String.format(Locale.JAPAN, "%,d", actualTotalAssets)}", color = Color(0xFFFFB74D), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        if (canStart) {
+            // 許容支出（合計）
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = Color.White,
+                border = BorderStroke(1.dp, NotionBorder)
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = Color(0xFF2196F3).copy(alpha = 0.08f)) {
+                        Icon(Icons.Default.Wallet, null, tint = Color(0xFF2196F3), modifier = Modifier.padding(10.dp))
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("合計の許容支出", fontSize = 12.sp, color = NotionTextSecondary)
+                        Text("¥ ${String.format(Locale.JAPAN, "%,d", totalSpendable)}", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            // 月の予算
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = Color.White,
+                border = BorderStroke(1.dp, NotionBorder)
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = Color(0xFF2196F3).copy(alpha = 0.08f)) {
+                        Icon(Icons.Default.CalendarMonth, null, tint = Color(0xFF2196F3), modifier = Modifier.padding(10.dp))
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("月の予算", fontSize = 12.sp, color = NotionTextSecondary)
+                        Text("¥ ${String.format(Locale.JAPAN, "%,d", monthlyBudget)}", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    Spacer(Modifier.height(24.dp))
+
+    // 貯蓄を開始するボタン
+    Button(
+        onClick = onStart,
+        modifier = Modifier.fillMaxWidth().height(52.dp),
+        enabled = canStart,
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen, disabledContainerColor = NotionBorder)
+    ) {
+        Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("貯蓄を開始する", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun GoalProgressView(
+    titleText: String,
+    actualTotalAssets: Long,
+    targetAmount: Long,
+    startDateMillis: Long,
+    targetDateMillis: Long,
+    remainingDays: Int,
+    aiIsReady: Boolean,
+    aiIsGenerating: Boolean,
+    showAiProgress: Boolean,
+    aiStatusLabel: String?,
+    goalAiText: String,
+    onRefreshAi: () -> Unit,
+    onEditClick: () -> Unit
+) {
+    val progressRatio = if (targetAmount > 0) (actualTotalAssets.toFloat() / targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
+    val progressPercent = (progressRatio * 100).toInt()
+
+    val totalGoalDays = ((targetDateMillis - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(1L)
+    val passedDays = ((System.currentTimeMillis() - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
+    val timeProgressRatio = (passedDays.toFloat() / totalGoalDays.toFloat()).coerceIn(0f, 1f)
+
+    // 1: 目標と現在の資産
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFE3F2FD).copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+            .border(1.dp, Color(0xFF2196F3).copy(alpha = 0.2f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 24.dp, vertical = 20.dp)
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+            Text("Current Progress🏃", color = Color(0xFF1976D2), fontSize = 16.sp, fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(6.dp))
+            val statusTitle = if (titleText.isNotEmpty()) "「${titleText}」に向かって貯金中" else "目標に向かって貯金中"
+            Text(statusTitle, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(12.dp))
+            Text("¥ ${String.format(Locale.JAPAN, "%,d", actualTotalAssets)}", color = Color(0xFF1976D2), fontSize = 32.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
+        }
+    }
+
+    Spacer(Modifier.height(12.dp))
+
+    // 2: 実績サマリー
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White, RoundedCornerShape(16.dp))
+            .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
+            .padding(18.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            // 上段: 目標達成率
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                    Text("目標達成", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("$progressPercent%", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+                LinearProgressIndicator(
+                    progress = { progressRatio },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = Color(0xFF2196F3),
+                    trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
+                    strokeCap = StrokeCap.Round
+                )
+            }
+
+            HorizontalDivider(thickness = 0.5.dp, color = NotionBorder)
+
+            // 下段: 期間経過率
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                    Text("期間経過", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("${(timeProgressRatio * 100).toInt()}%", color = NotionSafeGreen, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+                LinearProgressIndicator(
+                    progress = { timeProgressRatio },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = NotionSafeGreen,
+                    trackColor = NotionSafeGreen.copy(alpha = 0.12f),
+                    strokeCap = StrokeCap.Round
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("残り $remainingDays 日", color = NotionTextSecondary, fontSize = 12.sp)
+                    Text("目標 ¥ ${String.format(Locale.JAPAN, "%,d", targetAmount)}", color = NotionTextSecondary, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+
+    Spacer(Modifier.height(12.dp))
+
+    // 覗き魔 AI カード
+    AiAdvisorCard(
+        aiIsReady = aiIsReady,
+        aiIsGenerating = aiIsGenerating,
+        showAiProgress = showAiProgress,
+        aiStatusLabel = aiStatusLabel,
+        goalAiText = goalAiText,
+        onRefreshAi = onRefreshAi
+    )
+
+    Spacer(Modifier.height(24.dp))
+    OutlinedButton(
+        onClick = onEditClick,
+        modifier = Modifier.fillMaxWidth().height(48.dp),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, NotionBorder)
+    ) {
+        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp), tint = NotionTextSecondary)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("設定を変更", fontSize = 14.sp, color = NotionTextSecondary)
+    }
+}
+
+@Composable
+fun AiAdvisorCard(
+    aiIsReady: Boolean,
+    aiIsGenerating: Boolean,
+    showAiProgress: Boolean,
+    aiStatusLabel: String?,
+    goalAiText: String,
+    onRefreshAi: () -> Unit,
+    defaultText: String? = null
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 128.dp)
+            .background(Color.White, RoundedCornerShape(16.dp))
+            .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
+            .padding(18.dp)
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .background(NotionSafeGreen.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.AutoAwesome, "AI", tint = NotionSafeGreen, modifier = Modifier.size(16.dp))
+                }
+                Spacer(Modifier.width(8.dp))
+                Text("覗き魔 AI", color = NotionSafeGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                if (aiIsReady && !aiIsGenerating) {
+                    IconButton(onClick = onRefreshAi, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Refresh, "再生成", tint = NotionSafeGreen, modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            if (showAiProgress) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)),
+                    color = NotionSafeGreen,
+                    trackColor = NotionSafeGreen.copy(alpha = 0.2f)
+                )
+                Spacer(Modifier.height(12.dp))
+            }
+            if (aiStatusLabel != null) {
+                Text(aiStatusLabel, color = NotionTextSecondary.copy(alpha = 0.6f), fontSize = 12.sp)
+            } else if (goalAiText.isNotEmpty()) {
+                Text(goalAiText, color = NotionTextPrimary, fontSize = 14.sp, lineHeight = 22.sp)
+            } else if (defaultText != null) {
+                Text(defaultText, color = NotionTextPrimary, fontSize = 14.sp, lineHeight = 22.sp)
+            }
+        }
+    }
+}
 
 // --- ヘルパー Composable ---
 
@@ -4179,6 +4950,7 @@ fun DeleteConfirmDialog(text: String, onDismiss: () -> Unit, onConfirm: () -> Un
 @Composable
 fun ScreenHeader(
     title: String,
+    navigationIcon: @Composable (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null
 ) {
     Row(
@@ -4189,6 +4961,10 @@ fun ScreenHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
+        if (navigationIcon != null) {
+            navigationIcon()
+            Spacer(Modifier.width(8.dp))
+        }
         Text(
             text = title,
             color = NotionTextPrimary,
@@ -4199,4 +4975,5 @@ fun ScreenHeader(
         )
         if (trailingContent != null) trailingContent()
     }
+}
 }

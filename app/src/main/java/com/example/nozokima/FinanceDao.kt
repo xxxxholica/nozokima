@@ -89,4 +89,75 @@ interface FinanceDao {
 
     @Query("DELETE FROM chat_messages WHERE sessionId = :sessionId")
     suspend fun deleteMessagesForSession(sessionId: String)
+
+    @Query("SELECT * FROM transactions")
+    suspend fun getAllTransactionsList(): List<TransactionEntity>
+
+    @Query("SELECT * FROM assets")
+    suspend fun getAllAssetsList(): List<AssetEntity>
+
+    @Query("SELECT * FROM budgets")
+    suspend fun getAllBudgetsList(): List<BudgetEntity>
+
+    @Query("SELECT * FROM lendings")
+    suspend fun getAllLendingsList(): List<LendingEntity>
+
+    @Query("SELECT * FROM chat_sessions")
+    suspend fun getAllChatSessionsList(): List<ChatSessionEntity>
+
+    @Query("SELECT * FROM chat_messages")
+    suspend fun getAllChatMessagesList(): List<ChatMessageEntity>
+
+    @Query("SELECT * FROM goal_settings WHERE id = 1 LIMIT 1")
+    suspend fun getGoalSettingSync(): GoalSettingEntity?
+
+    @Query("DELETE FROM transactions")
+    suspend fun deleteAllTransactions()
+
+    @Query("DELETE FROM assets")
+    suspend fun deleteAllAssets()
+
+    @Query("DELETE FROM budgets")
+    suspend fun deleteAllBudgets()
+
+    @Query("DELETE FROM lendings")
+    suspend fun deleteAllLendings()
+
+    @Query("DELETE FROM chat_sessions")
+    suspend fun deleteAllChatSessions()
+
+    @Query("DELETE FROM chat_messages")
+    suspend fun deleteAllChatMessages()
+
+    @Query("DELETE FROM goal_settings")
+    suspend fun deleteAllGoalSettings()
+
+    // バックアップ履歴
+    @Query("SELECT * FROM backup_history ORDER BY date DESC")
+    fun getAllBackupHistory(): Flow<List<BackupHistoryEntity>>
+
+    @Insert
+    suspend fun insertBackupHistory(history: BackupHistoryEntity)
+
+    @Delete
+    suspend fun deleteBackupHistory(history: BackupHistoryEntity)
+
+    @Query("DELETE FROM backup_history WHERE date < :timestamp")
+    suspend fun deleteOldBackupHistory(timestamp: Long)
+
+    @Query("SELECT * FROM backup_history")
+    suspend fun getAllBackupHistoryList(): List<BackupHistoryEntity>
+
+    @Query("DELETE FROM backup_history")
+    suspend fun deleteAllBackupHistory()
+
+    // アプリ設定
+    @Query("SELECT * FROM app_settings WHERE id = 1 LIMIT 1")
+    fun getAppSettings(): Flow<AppSettingsEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAppSettings(settings: AppSettingsEntity)
+
+    @Query("DELETE FROM app_settings")
+    suspend fun deleteAllAppSettings()
 }
