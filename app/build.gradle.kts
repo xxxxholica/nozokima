@@ -54,6 +54,12 @@ android {
     buildFeatures {
         compose = true
     }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
     // assetsに巨大ファイルを置かないため、noCompressの設定は不要になりました
 }
 
@@ -74,6 +80,10 @@ dependencies {
     ksp("androidx.room:room-compiler:$roomVersion")
 
     implementation("net.objecthunter:exp4j:0.4.8")
+
+    // ML Kit Text Recognition
+    implementation("com.google.mlkit:text-recognition:16.0.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
     // ML Kit GenAI Prompt API (Gemini Nano)
     implementation("com.google.mlkit:genai-prompt:1.0.0-beta2")

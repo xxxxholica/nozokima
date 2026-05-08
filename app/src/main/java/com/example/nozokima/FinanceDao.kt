@@ -160,4 +160,36 @@ interface FinanceDao {
 
     @Query("DELETE FROM app_settings")
     suspend fun deleteAllAppSettings()
+
+    // カテゴリ関連
+    @Query("SELECT * FROM categories ORDER BY `order` ASC")
+    fun getAllCategories(): Flow<List<CategoryEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCategory(category: CategoryEntity)
+
+    @Update
+    suspend fun updateCategory(category: CategoryEntity)
+
+    @Delete
+    suspend fun deleteCategory(category: CategoryEntity)
+
+    @Query("SELECT COUNT(*) FROM categories")
+    suspend fun getCategoryCount(): Int
+
+    // 固定費関連
+    @Query("SELECT * FROM recurring_transactions")
+    fun getAllRecurringTransactions(): Flow<List<RecurringTransactionEntity>>
+
+    @Query("SELECT * FROM recurring_transactions")
+    suspend fun getAllRecurringTransactionsListSync(): List<RecurringTransactionEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRecurringTransaction(recurring: RecurringTransactionEntity)
+
+    @Update
+    suspend fun updateRecurringTransaction(recurring: RecurringTransactionEntity)
+
+    @Delete
+    suspend fun deleteRecurringTransaction(recurring: RecurringTransactionEntity)
 }

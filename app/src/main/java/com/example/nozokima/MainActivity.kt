@@ -3,11 +3,20 @@
 package com.example.nozokima
 
 import android.os.Bundle
+import android.content.Context
+import android.content.Intent
+import android.content.ClipData
+import android.Manifest
+import androidx.core.content.ContextCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.setContent
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -62,6 +71,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import ui.theme.*
 import androidx.room.Room
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -71,20 +83,18 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
+// --- 自作コントラクト ---
+
+class TakePictureWithExplicitGrants : ActivityResultContracts.TakePicture() {
+    override fun createIntent(context: Context, input: android.net.Uri): Intent {
+        return super.createIntent(context, input).apply {
+            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            clipData = ClipData.newRawUri(null, input)
+        }
+    }
+}
+
 // --- データモデル ---
-
-data class AssetItemData(
-    val id: String = UUID.randomUUID().toString(),
-    val name: String,
-    val amount: Int,
-    val lastUpdated: Long = System.currentTimeMillis()
-)
-
-data class AssetCategoryData(
-    val id: String = UUID.randomUUID().toString(),
-    var title: String,
-    val items: SnapshotStateList<AssetItemData>
-)
 
 data class CategoryData(
     val name: String,
@@ -141,6 +151,7 @@ data class ChatMessage(
 class MainActivity : ComponentActivity() {
     private val db by lazy { (application as NozokimaApplication).database }
     private val gemini by lazy { (application as NozokimaApplication).geminiModel }
+    private val ocrManager by lazy { OcrManager(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -187,7 +198,25 @@ class MainActivity : ComponentActivity() {
             val appSettings by dao.getAppSettings().collectAsState(initial = null)
 
             var isAppLocked by rememberSaveable { mutableStateOf(true) }
+            var isExternalActivityLaunching by rememberSaveable { mutableStateOf(false) }
             val showLockScreen = isAppLocked && appSettings?.isAppLockEnabled == true
+            val lifecycle = LocalLifecycleOwner.current.lifecycle
+
+            DisposableEffect(lifecycle) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_STOP) {
+                        if (!isExternalActivityLaunching) {
+                            isAppLocked = true
+                        }
+                    } else if (event == Lifecycle.Event.ON_RESUME) {
+                        isExternalActivityLaunching = false
+                    }
+                }
+                lifecycle.addObserver(observer)
+                onDispose {
+                    lifecycle.removeObserver(observer)
+                }
+            }
 
             // AI 状態管理 (Activityレベルで保持してタブ遷移中も継続) ---
             var homeAiText by rememberSaveable { mutableStateOf("") }
@@ -363,6 +392,71 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // 固定費のチェックと処理
+            LaunchedEffect(Unit) {
+                scope.launch {
+                    val recurringList = dao.getAllRecurringTransactionsListSync()
+                    val now = Calendar.getInstance()
+                    val today = now.get(Calendar.DAY_OF_MONTH)
+                    val todayMillis = now.timeInMillis
+                    
+                    recurringList.forEach { recurring ->
+                        // 本日が指定日かつ、最後に処理したのが本日でない場合
+                        if (recurring.dayOfMonth == today) {
+                            val lastProcessed = Calendar.getInstance().apply { timeInMillis = recurring.lastProcessedDate }
+                            val isAlreadyProcessedToday = recurring.lastProcessedDate != 0L && 
+                                lastProcessed.get(Calendar.YEAR) == now.get(Calendar.YEAR) &&
+                                lastProcessed.get(Calendar.MONTH) == now.get(Calendar.MONTH) &&
+                                lastProcessed.get(Calendar.DAY_OF_MONTH) == now.get(Calendar.DAY_OF_MONTH)
+                            
+                            if (!isAlreadyProcessedToday) {
+                                val asset = dao.getAssetByName(recurring.assetName)
+                                if (asset != null) {
+                                    dao.insertTransaction(TransactionEntity(
+                                        id = UUID.randomUUID().toString(),
+                                        name = "[固定費] ${recurring.name}",
+                                        amount = recurring.amount,
+                                        category = recurring.category,
+                                        date = todayMillis,
+                                        assetName = recurring.assetName,
+                                        isExpense = recurring.isExpense
+                                    ))
+                                    dao.updateAsset(asset.copy(
+                                        amount = if (recurring.isExpense) asset.amount - recurring.amount else asset.amount + recurring.amount,
+                                        lastUpdated = todayMillis
+                                    ))
+                                    dao.updateRecurringTransaction(recurring.copy(lastProcessedDate = todayMillis))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // デフォルトカテゴリの初期化
+            LaunchedEffect(Unit) {
+                scope.launch {
+                    if (dao.getCategoryCount() == 0) {
+                        val defaultCategories = listOf(
+                            CategoryEntity(UUID.randomUUID().toString(), "食費", "EXPENSE", "ShoppingCart", true, 0),
+                            CategoryEntity(UUID.randomUUID().toString(), "日用品", "EXPENSE", "Build", true, 1),
+                            CategoryEntity(UUID.randomUUID().toString(), "交通費", "EXPENSE", "Place", true, 2),
+                            CategoryEntity(UUID.randomUUID().toString(), "交際費", "EXPENSE", "Favorite", true, 3),
+                            CategoryEntity(UUID.randomUUID().toString(), "娯楽", "EXPENSE", "Star", true, 4),
+                            CategoryEntity(UUID.randomUUID().toString(), "美容", "EXPENSE", "Face", true, 5),
+                            CategoryEntity(UUID.randomUUID().toString(), "健康", "EXPENSE", "Info", true, 6),
+                            CategoryEntity(UUID.randomUUID().toString(), "その他", "EXPENSE", "MoreHoriz", true, 7),
+                            CategoryEntity(UUID.randomUUID().toString(), "給与", "INCOME", "AccountBalance", true, 8),
+                            CategoryEntity(UUID.randomUUID().toString(), "賞与", "INCOME", "Star", true, 9),
+                            CategoryEntity(UUID.randomUUID().toString(), "副業", "INCOME", "Build", true, 10),
+                            CategoryEntity(UUID.randomUUID().toString(), "お小遣い", "INCOME", "Favorite", true, 11),
+                            CategoryEntity(UUID.randomUUID().toString(), "還付金", "INCOME", "Info", true, 12)
+                        )
+                        defaultCategories.forEach { dao.insertCategory(it) }
+                    }
+                }
+            }
+
             // Home の生成が完了した、または目標が開始されたら Goal をトリガー
             LaunchedEffect(homeAiText, aiIsGenerating, goalSetting?.showResults) {
                 if (aiIsReady && (homeAiText.isNotEmpty() || (goalSetting != null && goalSetting!!.showResults)) && 
@@ -410,85 +504,161 @@ class MainActivity : ComponentActivity() {
             }
 
             if (showAppLockPasswordDialog) {
-                var passwordText by remember { mutableStateOf("") }
-                var confirmPasswordText by remember { mutableStateOf("") }
-                var isPasswordVisible by remember { mutableStateOf(false) }
+                var currentPasswordInput by remember { mutableStateOf("") }
+                var newPasswordInput by remember { mutableStateOf("") }
+                var confirmPasswordInput by remember { mutableStateOf("") }
+                
+                // 0: Initial/Disable, 1: New Password, 2: Confirm New Password
+                var step by remember { mutableIntStateOf(0) }
+                
                 val isDisableMode = appLockDialogMode == "disable"
+                val isChangeMode = appLockDialogMode == "change"
 
                 AlertDialog(
                     onDismissRequest = { showAppLockPasswordDialog = false },
                     title = { 
                         Text(when(appLockDialogMode) {
-                            "set" -> "アプリロックの設定"
-                            "change" -> "パスワードの変更"
+                            "set" -> if (step == 0) "パスワードの設定" else "パスワードの確認"
+                            "change" -> when(step) {
+                                0 -> "現在のパスワード"
+                                1 -> "新しいパスワード"
+                                else -> "パスワードの確認"
+                            }
                             else -> "ロックの解除"
                         })
                     },
                     text = {
-                        Column {
-                            if (isDisableMode) {
-                                Text("ロックを解除するには現在のパスワードを入力してください", fontSize = 12.sp, color = NotionTextSecondary)
-                            } else {
-                                Text("4文字以上のパスワードを入力してください", fontSize = 12.sp, color = NotionTextSecondary)
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = passwordText,
-                                onValueChange = { passwordText = it },
-                                visualTransformation = if (isPasswordVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password),
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text(if (isDisableMode) "現在のパスワード" else "パスワード") },
-                                singleLine = true,
-                                trailingIcon = {
-                                    IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
-                                        Icon(
-                                            imageVector = if (isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                            contentDescription = null,
-                                            tint = NotionTextSecondary
-                                        )
-                                    }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            val description = when {
+                                isDisableMode -> "ロックを解除するには現在のパスワードを入力してください"
+                                isChangeMode -> when(step) {
+                                    0 -> "現在のパスワードを入力してください"
+                                    1 -> "新しいパスワード（4〜12桁）を入力してください"
+                                    else -> "もう一度入力してください"
                                 }
-                            )
-                            if (!isDisableMode) {
-                                Spacer(Modifier.height(8.dp))
-                                OutlinedTextField(
-                                    value = confirmPasswordText,
-                                    onValueChange = { confirmPasswordText = it },
-                                    visualTransformation = if (isPasswordVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    label = { Text("パスワード（再入力）") },
-                                    singleLine = true
-                                )
+                                else -> if (step == 0) "パスワード（4〜12桁）を入力してください" else "もう一度入力してください"
                             }
+                            Text(description, fontSize = 12.sp, color = NotionTextSecondary)
+                            Spacer(Modifier.height(24.dp))
+                            
+                            val currentInputText = when(step) {
+                                0 -> currentPasswordInput
+                                1 -> newPasswordInput
+                                else -> confirmPasswordInput
+                            }
+                            
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Spacer(Modifier.weight(1f))
+                                repeat(currentInputText.length) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clip(CircleShape)
+                                            .background(NotionSafeGreen)
+                                            .border(1.dp, NotionSafeGreen, CircleShape)
+                                    )
+                                }
+                                if (currentInputText.isEmpty()) {
+                                    Text(" ", fontSize = 16.sp) // Maintain height
+                                }
+                                Spacer(Modifier.weight(1f))
+                            }
+                            
+                            Spacer(Modifier.height(32.dp))
+                            
+                            PinKeypad(
+                                onNumberClick = { num ->
+                                    when(step) {
+                                        0 -> currentPasswordInput += num
+                                        1 -> if (newPasswordInput.length < 12) newPasswordInput += num
+                                        2 -> if (confirmPasswordInput.length < 12) confirmPasswordInput += num
+                                    }
+                                },
+                                onDeleteClick = {
+                                    when(step) {
+                                        0 -> if (currentPasswordInput.isNotEmpty()) currentPasswordInput = currentPasswordInput.dropLast(1)
+                                        1 -> if (newPasswordInput.isNotEmpty()) newPasswordInput = newPasswordInput.dropLast(1)
+                                        2 -> if (confirmPasswordInput.isNotEmpty()) confirmPasswordInput = confirmPasswordInput.dropLast(1)
+                                    }
+                                },
+                                onConfirmClick = {
+                                    when {
+                                        isDisableMode -> {
+                                            if (currentPasswordInput == appSettings?.appLockPassword) {
+                                                scope.launch {
+                                                    dao.upsertAppSettings(appSettings!!.copy(isAppLockEnabled = false))
+                                                    showAppLockPasswordDialog = false
+                                                }
+                                            } else {
+                                                scope.launch { snackbarHostState.showSnackbar("パスワードが正しくありません") }
+                                                currentPasswordInput = ""
+                                            }
+                                        }
+                                        isChangeMode -> {
+                                            when(step) {
+                                                0 -> {
+                                                    if (currentPasswordInput == appSettings?.appLockPassword) {
+                                                        step = 1
+                                                    } else {
+                                                        scope.launch { snackbarHostState.showSnackbar("現在のパスワードが正しくありません") }
+                                                        currentPasswordInput = ""
+                                                    }
+                                                }
+                                                1 -> step = 2
+                                                2 -> {
+                                                    if (newPasswordInput == confirmPasswordInput) {
+                                                        scope.launch {
+                                                            val currentSettings = appSettings ?: AppSettingsEntity()
+                                                            dao.upsertAppSettings(currentSettings.copy(
+                                                                appLockPassword = newPasswordInput,
+                                                                isAppLockEnabled = true
+                                                            ))
+                                                            showAppLockPasswordDialog = false
+                                                            snackbarHostState.showSnackbar("パスワードを変更しました")
+                                                        }
+                                                    } else {
+                                                        scope.launch { snackbarHostState.showSnackbar("パスワードが一致しません") }
+                                                        confirmPasswordInput = ""
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        else -> { // Set mode
+                                            if (step == 0) {
+                                                step = 2 // Skip 1 for consistency if needed, but let's just use 0 and 2
+                                            } else {
+                                                if (currentPasswordInput == confirmPasswordInput) {
+                                                    scope.launch {
+                                                        val currentSettings = appSettings ?: AppSettingsEntity()
+                                                        dao.upsertAppSettings(currentSettings.copy(
+                                                            appLockPassword = currentPasswordInput,
+                                                            isAppLockEnabled = true
+                                                        ))
+                                                        showAppLockPasswordDialog = false
+                                                        snackbarHostState.showSnackbar("パスワードを設定しました")
+                                                    }
+                                                } else {
+                                                    scope.launch { snackbarHostState.showSnackbar("パスワードが一致しません") }
+                                                    confirmPasswordInput = ""
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                isConfirmEnabled = when(step) {
+                                    0 -> currentPasswordInput.isNotEmpty()
+                                    1 -> newPasswordInput.length >= 4
+                                    else -> confirmPasswordInput.length >= 4
+                                },
+                                confirmLabel = if (isDisableMode) "解除" else if (isChangeMode && step < 2 || !isChangeMode && step == 0) "次へ" else "確定"
+                            )
                         }
                     },
-                    confirmButton = {
-                        TextButton(
-                            enabled = if (isDisableMode) passwordText.isNotEmpty() else passwordText.length >= 4 && passwordText == confirmPasswordText,
-                            onClick = {
-                                scope.launch {
-                                    if (isDisableMode) {
-                                        if (passwordText == appSettings?.appLockPassword) {
-                                            dao.upsertAppSettings(appSettings!!.copy(isAppLockEnabled = false))
-                                            showAppLockPasswordDialog = false
-                                        } else {
-                                            snackbarHostState.showSnackbar("パスワードが正しくありません")
-                                        }
-                                    } else {
-                                        val currentSettings = appSettings ?: AppSettingsEntity()
-                                        dao.upsertAppSettings(currentSettings.copy(
-                                            appLockPassword = passwordText,
-                                            isAppLockEnabled = true
-                                        ))
-                                        showAppLockPasswordDialog = false
-                                        snackbarHostState.showSnackbar("パスワードを設定しました")
-                                    }
-                                }
-                            }
-                        ) { Text("確定") }
-                    },
+                    confirmButton = {},
                     dismissButton = {
                         TextButton(onClick = { showAppLockPasswordDialog = false }) { Text("キャンセル") }
                     }
@@ -607,7 +777,21 @@ class MainActivity : ComponentActivity() {
                 if (showLockScreen) {
                     AppLockScreen(
                         correctPassword = appSettings?.appLockPassword ?: "",
-                        onUnlock = { isAppLocked = false }
+                        onUnlock = { isAppLocked = false },
+                        failedAttempts = appSettings?.failedAttempts ?: 0,
+                        lockoutUntil = appSettings?.lockoutUntil ?: 0L,
+                        onFailedAttempt = { attempts, until ->
+                            scope.launch {
+                                val current = appSettings ?: AppSettingsEntity()
+                                dao.upsertAppSettings(current.copy(failedAttempts = attempts, lockoutUntil = until))
+                            }
+                        },
+                        onSuccessfulUnlock = {
+                            scope.launch {
+                                val current = appSettings ?: AppSettingsEntity()
+                                dao.upsertAppSettings(current.copy(failedAttempts = 0, lockoutUntil = 0L))
+                            }
+                        }
                     )
                 } else {
                     Box(modifier = Modifier.fillMaxSize()) {
@@ -675,8 +859,10 @@ class MainActivity : ComponentActivity() {
                                             InputScreen(
                                                 dao = dao,
                                                 gemini = gemini,
+                                                ocrManager = ocrManager,
                                                 initialRecovery = recoveryLending,
-                                                onRecoveryHandled = { recoveryLending = null }
+                                                onRecoveryHandled = { recoveryLending = null },
+                                                onExternalActivityLaunch = { isExternalActivityLaunching = true }
                                             )
                                         }
                                         2 -> Box(Modifier.padding(innerPadding)) {
@@ -743,10 +929,18 @@ class MainActivity : ComponentActivity() {
                                                 onImportClick = {
                                                     importLauncher.launch(arrayOf("*/*"))
                                                 },
+                                                onCategoryManagementClick = { selectedTab = 6 },
+                                                onRecurringManagementClick = { selectedTab = 7 },
                                                 onBack = {
                                                     selectedTab = 0
                                                 }
                                             )
+                                        }
+                                        6 -> Box(Modifier.padding(innerPadding)) {
+                                            CategoryManagementScreen(dao = dao, onBack = { selectedTab = 5 })
+                                        }
+                                        7 -> Box(Modifier.padding(innerPadding)) {
+                                            RecurringTransactionManagementScreen(dao = dao, onBack = { selectedTab = 5 })
                                         }
                                     }
                                 }
@@ -774,15 +968,378 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// --- 設定関連画面 ---
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CategoryManagementScreen(
+    dao: FinanceDao,
+    onBack: () -> Unit
+) {
+    val categories by dao.getAllCategories().collectAsState(initial = emptyList())
+    var showAddDialog by remember { mutableStateOf(false) }
+    var editCategory by remember { mutableStateOf<CategoryEntity?>(null) }
+    var nameText by remember { mutableStateOf("") }
+    var selectedType by remember { mutableStateOf("EXPENSE") }
+    var selectedIcon by remember { mutableStateOf("MoreHoriz") }
+    val scope = rememberCoroutineScope()
+
+    val iconOptions = listOf("ShoppingCart", "Build", "Place", "Favorite", "Star", "Face", "Info", "MoreHoriz", "AccountBalance")
+
+    if (showAddDialog || editCategory != null) {
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false; editCategory = null },
+            title = { Text(if (editCategory == null) "カテゴリ追加" else "カテゴリ編集") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(value = nameText, onValueChange = { nameText = it }, label = { Text("カテゴリ名") }, modifier = Modifier.fillMaxWidth())
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = selectedType == "EXPENSE", onClick = { selectedType = "EXPENSE" }, label = { Text("支出") })
+                        FilterChip(selected = selectedType == "INCOME", onClick = { selectedType = "INCOME" }, label = { Text("収入") })
+                    }
+                    Text("アイコンを選択", fontSize = 12.sp, color = NotionTextSecondary)
+                    LazyVerticalGrid(columns = GridCells.Fixed(5), modifier = Modifier.height(110.dp)) {
+                        items(iconOptions) { iconName ->
+                            val icon = when(iconName) {
+                                "ShoppingCart" -> Icons.Default.ShoppingCart
+                                "Build" -> Icons.Default.Build
+                                "Place" -> Icons.Default.Place
+                                "Favorite" -> Icons.Default.Favorite
+                                "Star" -> Icons.Default.Star
+                                "Face" -> Icons.Default.Face
+                                "Info" -> Icons.Default.Info
+                                "MoreHoriz" -> Icons.Default.MoreHoriz
+                                "AccountBalance" -> Icons.Default.AccountBalance
+                                else -> Icons.Default.MoreHoriz
+                            }
+                            val isSelected = selectedIcon == iconName
+                            Box(
+                                modifier = Modifier
+                                    .padding(4.dp)
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) NotionSafeGreen.copy(alpha = 0.1f) else Color.Transparent)
+                                    .clickable { selectedIcon = iconName },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(icon, null, tint = if (isSelected) NotionSafeGreen else NotionTextSecondary)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = nameText.isNotBlank(),
+                    onClick = {
+                    scope.launch {
+                        if (editCategory == null) {
+                            dao.insertCategory(CategoryEntity(UUID.randomUUID().toString(), nameText, selectedType, selectedIcon))
+                        } else {
+                            dao.updateCategory(editCategory!!.copy(name = nameText, type = selectedType, iconName = selectedIcon))
+                        }
+                        showAddDialog = false
+                        editCategory = null
+                        nameText = ""
+                        selectedIcon = "MoreHoriz"
+                    }
+                }) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { showAddDialog = false; editCategory = null }) { Text("キャンセル") } }
+        )
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(NotionBackground)) {
+        ScreenHeader(title = "カテゴリ管理", navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) } }) {
+            IconButton(onClick = { showAddDialog = true; nameText = ""; selectedType = "EXPENSE"; selectedIcon = "MoreHoriz" }) { Icon(Icons.Default.Add, null) }
+        }
+        LazyColumn(modifier = Modifier.padding(16.dp)) {
+            items(categories) { cat ->
+                val icon = when(cat.iconName) {
+                    "ShoppingCart" -> Icons.Default.ShoppingCart
+                    "Build" -> Icons.Default.Build
+                    "Place" -> Icons.Default.Place
+                    "Favorite" -> Icons.Default.Favorite
+                    "Star" -> Icons.Default.Star
+                    "Face" -> Icons.Default.Face
+                    "Info" -> Icons.Default.Info
+                    "MoreHoriz" -> Icons.Default.MoreHoriz
+                    "AccountBalance" -> Icons.Default.AccountBalance
+                    else -> Icons.Default.MoreHoriz
+                }
+                ListItem(
+                    leadingContent = { 
+                        Box(
+                            modifier = Modifier.size(36.dp).background(NotionSafeGreen.copy(alpha = 0.05f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(icon, null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
+                        }
+                    },
+                    headlineContent = { Text(cat.name) },
+                    supportingContent = { Text(if (cat.type == "EXPENSE") "支出" else "収入") },
+                    trailingContent = {
+                        Row {
+                            IconButton(onClick = { 
+                                editCategory = cat
+                                nameText = cat.name
+                                selectedType = cat.type
+                                selectedIcon = cat.iconName
+                            }) { Icon(Icons.Default.Edit, null) }
+                            if (!cat.isDefault) {
+                                IconButton(onClick = { scope.launch { dao.deleteCategory(cat) } }) { Icon(Icons.Default.Delete, null, tint = Color.Red) }
+                            }
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RecurringTransactionManagementScreen(
+    dao: FinanceDao,
+    onBack: () -> Unit
+) {
+    val recurringList by dao.getAllRecurringTransactions().collectAsState(initial = emptyList())
+    val assets by dao.getAllAssets().collectAsState(initial = emptyList())
+    val categories by dao.getAllCategories().collectAsState(initial = emptyList())
+    
+    var showAddDialog by remember { mutableStateOf(false) }
+    var editRecurring by remember { mutableStateOf<RecurringTransactionEntity?>(null) }
+    var nameText by remember { mutableStateOf("") }
+    var amountText by remember { mutableStateOf("") }
+    var selectedDay by remember { mutableIntStateOf(1) }
+    var selectedAsset by remember { mutableStateOf<AssetEntity?>(null) }
+    var selectedCategoryName by remember { mutableStateOf("") }
+    var isExpense by remember { mutableStateOf(true) }
+    
+    var showAssetSheet by remember { mutableStateOf(false) }
+    var showCategorySheet by remember { mutableStateOf(false) }
+    var showDaySheet by remember { mutableStateOf(false) }
+
+    val scope = rememberCoroutineScope()
+
+    val iconMap = mapOf(
+        "ShoppingCart" to Icons.Default.ShoppingCart,
+        "Build" to Icons.Default.Build,
+        "Place" to Icons.Default.Place,
+        "Favorite" to Icons.Default.Favorite,
+        "Star" to Icons.Default.Star,
+        "Face" to Icons.Default.Face,
+        "Info" to Icons.Default.Info,
+        "MoreHoriz" to Icons.Default.MoreHoriz,
+        "AccountBalance" to Icons.Default.AccountBalance
+    )
+
+    if (showAddDialog || editRecurring != null) {
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false; editRecurring = null },
+            title = { Text(if (editRecurring == null) "固定費の追加" else "固定費の編集") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(value = nameText, onValueChange = { nameText = it }, label = { Text("名称（例: 家賃）") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(
+                        value = amountText, 
+                        onValueChange = { amountText = it }, 
+                        label = { Text("金額") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = isExpense, onClick = { isExpense = true }, label = { Text("支出") })
+                        FilterChip(selected = !isExpense, onClick = { isExpense = false }, label = { Text("収入") })
+                    }
+                    
+                    InputTile(
+                        icon = Icons.Default.CalendarMonth,
+                        label = "毎月の該当日",
+                        value = "${selectedDay}日",
+                        onClick = { showDaySheet = true },
+                        accentColor = NotionSafeGreen
+                    )
+                    
+                    InputTile(
+                        icon = Icons.Default.AccountBalanceWallet,
+                        label = "資産",
+                        value = selectedAsset?.name ?: "未選択",
+                        onClick = { showAssetSheet = true },
+                        accentColor = NotionSafeGreen,
+                        isPlaceholder = selectedAsset == null
+                    )
+                    
+                    InputTile(
+                        icon = iconMap[categories.find { it.name == selectedCategoryName }?.iconName] ?: Icons.Default.Category,
+                        label = "カテゴリ",
+                        value = if (selectedCategoryName.isEmpty()) "未選択" else selectedCategoryName,
+                        onClick = { showCategorySheet = true },
+                        accentColor = NotionSafeGreen,
+                        isPlaceholder = selectedCategoryName.isEmpty()
+                    )
+                }
+            },
+            confirmButton = {
+                val isValid = nameText.isNotBlank() && amountText.toIntOrNull() != null && selectedAsset != null && selectedCategoryName.isNotEmpty()
+                TextButton(
+                    enabled = isValid,
+                    onClick = {
+                    scope.launch {
+                        val entity = RecurringTransactionEntity(
+                            id = editRecurring?.id ?: UUID.randomUUID().toString(),
+                            name = nameText,
+                            amount = amountText.toIntOrNull() ?: 0,
+                            category = selectedCategoryName,
+                            assetName = selectedAsset?.name ?: "",
+                            dayOfMonth = selectedDay,
+                            isExpense = isExpense,
+                            lastProcessedDate = editRecurring?.lastProcessedDate ?: 0L
+                        )
+                        if (editRecurring == null) {
+                            dao.insertRecurringTransaction(entity)
+                        } else {
+                            dao.updateRecurringTransaction(entity)
+                        }
+                        showAddDialog = false
+                        editRecurring = null
+                    }
+                }) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { showAddDialog = false; editRecurring = null }) { Text("キャンセル") } }
+        )
+    }
+
+    if (showAssetSheet) {
+        ModalBottomSheet(onDismissRequest = { showAssetSheet = false }) {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
+                Text("資産を選択", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
+                assets.forEach { asset ->
+                    ListItem(
+                        headlineContent = { Text(asset.name) },
+                        trailingContent = { Text("¥ ${String.format(Locale.JAPAN, "%,d", asset.amount)}") },
+                        modifier = Modifier.clickable { 
+                            selectedAsset = asset
+                            showAssetSheet = false 
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    if (showCategorySheet) {
+        val filteredCategories = categories.filter { if (isExpense) it.type == "EXPENSE" else it.type == "INCOME" }
+        ModalBottomSheet(onDismissRequest = { showCategorySheet = false }) {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                Text("カテゴリを選択", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
+                LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.padding(horizontal = 12.dp)) {
+                    items(filteredCategories) { cat ->
+                        Column(
+                            modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { 
+                                selectedCategoryName = cat.name
+                                showCategorySheet = false 
+                            }.padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Surface(modifier = Modifier.size(48.dp), shape = CircleShape, color = if (selectedCategoryName == cat.name) NotionSafeGreen.copy(alpha = 0.1f) else NotionBackground) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(iconMap[cat.iconName] ?: Icons.Default.MoreHoriz, null, tint = if (selectedCategoryName == cat.name) NotionSafeGreen else NotionTextSecondary)
+                                }
+                            }
+                            Text(cat.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDaySheet) {
+        ModalBottomSheet(onDismissRequest = { showDaySheet = false }) {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
+                Text("該当日を選択", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
+                LazyVerticalGrid(columns = GridCells.Fixed(7), modifier = Modifier.padding(12.dp)) {
+                    items(31) { i ->
+                        val day = i + 1
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(if (selectedDay == day) NotionSafeGreen else Color.Transparent)
+                                .clickable { selectedDay = day; showDaySheet = false },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("$day", color = if (selectedDay == day) Color.White else NotionTextPrimary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(NotionBackground)) {
+        ScreenHeader(title = "固定費設定", navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) } }) {
+            IconButton(onClick = { 
+                showAddDialog = true
+                nameText = ""
+                amountText = ""
+                selectedDay = 1
+                selectedAsset = null
+                selectedCategoryName = ""
+                isExpense = true
+                editRecurring = null
+            }) { Icon(Icons.Default.Add, null) }
+        }
+        LazyColumn(modifier = Modifier.padding(16.dp)) {
+            items(recurringList) { item ->
+                ListItem(
+                    headlineContent = { Text(item.name) },
+                    supportingContent = { Text("毎月 ${item.dayOfMonth}日 / ¥${String.format(Locale.JAPAN, "%,d", item.amount)} / ${item.assetName}") },
+                    trailingContent = {
+                        Row {
+                            IconButton(onClick = {
+                                editRecurring = item
+                                nameText = item.name
+                                amountText = item.amount.toString()
+                                selectedDay = item.dayOfMonth
+                                selectedAsset = assets.find { it.name == item.assetName }
+                                selectedCategoryName = item.category
+                                isExpense = item.isExpense
+                            }) { Icon(Icons.Default.Edit, null) }
+                            IconButton(onClick = { scope.launch { dao.deleteRecurringTransaction(item) } }) { Icon(Icons.Default.Delete, null, tint = Color.Red) }
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
 // --- アプリロック画面 ---
 
 @Composable
 fun AppLockScreen(
     correctPassword: String,
-    onUnlock: () -> Unit
+    onUnlock: () -> Unit,
+    failedAttempts: Int,
+    lockoutUntil: Long,
+    onFailedAttempt: (Int, Long) -> Unit,
+    onSuccessfulUnlock: () -> Unit
 ) {
     var inputPassword by remember { mutableStateOf("") }
     var isError by remember { mutableStateOf(false) }
+    var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    val isLockedOut = lockoutUntil > currentTime
+    val remainingLockoutSeconds = if (isLockedOut) ((lockoutUntil - currentTime) / 1000).toInt() else 0
+
+    LaunchedEffect(isLockedOut) {
+        while (currentTime < lockoutUntil) {
+            kotlinx.coroutines.delay(1000)
+            currentTime = System.currentTimeMillis()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -793,44 +1350,164 @@ fun AppLockScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            imageVector = Icons.Default.Lock,
+            imageVector = if (isLockedOut) Icons.Default.Timer else Icons.Default.Lock,
             contentDescription = null,
-            tint = NotionSafeGreen,
+            tint = if (isLockedOut) Color(0xFFE57373) else NotionSafeGreen,
             modifier = Modifier.size(64.dp)
         )
         Spacer(modifier = Modifier.height(24.dp))
         Text(
-            text = "アプリはロックされています",
+            text = if (isLockedOut) "入力を一時制限しています" else "アプリはロックされています",
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
             color = NotionTextPrimary
         )
-        Spacer(modifier = Modifier.height(32.dp))
         
-        OutlinedTextField(
-            value = inputPassword,
-            onValueChange = { 
-                inputPassword = it
-                isError = false
-                if (it == correctPassword) {
-                    onUnlock()
-                }
-            },
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password),
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("パスワードを入力") },
-            isError = isError,
-            singleLine = true
-        )
-        
-        if (isError) {
+        if (isLockedOut) {
             Text(
-                text = "パスワードが正しくありません",
-                color = Color.Red,
-                fontSize = 12.sp,
+                text = "残り $remainingLockoutSeconds 秒後に再試行できます",
+                color = Color(0xFFE57373),
+                fontSize = 14.sp,
                 modifier = Modifier.padding(top = 8.dp)
             )
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+        
+        if (!isLockedOut) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
+                repeat(inputPassword.length) {
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(NotionSafeGreen)
+                            .border(1.dp, NotionSafeGreen, CircleShape)
+                    )
+                }
+                if (inputPassword.isEmpty()) {
+                    Text(" ", fontSize = 16.sp) // Maintain height
+                }
+            }
+        } else {
+            Spacer(Modifier.height(16.dp)) // Maintain height occupied by indicators
+        }
+        
+        Box(modifier = Modifier.height(32.dp).padding(top = 16.dp), contentAlignment = Alignment.Center) {
+            if (isError && !isLockedOut) {
+                Text(
+                    text = "パスワードが正しくありません (残り ${3 - failedAttempts} 回)",
+                    color = Color.Red,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        PinKeypad(
+            onNumberClick = { num ->
+                if (inputPassword.length < 12 && !isLockedOut) {
+                    inputPassword += num
+                    isError = false
+                }
+            },
+            onDeleteClick = {
+                if (inputPassword.isNotEmpty() && !isLockedOut) {
+                    inputPassword = inputPassword.dropLast(1)
+                    isError = false
+                }
+            },
+            onConfirmClick = {
+                if (inputPassword == correctPassword) {
+                    onSuccessfulUnlock()
+                    onUnlock()
+                } else {
+                    val nextFailedAttempts = failedAttempts + 1
+                    var nextLockoutUntil = 0L
+                    if (nextFailedAttempts >= 3) {
+                        nextLockoutUntil = System.currentTimeMillis() + 60 * 1000
+                    }
+                    onFailedAttempt(if (nextFailedAttempts >= 3) 0 else nextFailedAttempts, nextLockoutUntil)
+                    isError = true
+                    inputPassword = ""
+                }
+            },
+            isConfirmEnabled = inputPassword.length >= 4 && !isLockedOut,
+            confirmLabel = "解除"
+        )
+    }
+}
+
+@Composable
+fun PinKeypad(
+    onNumberClick: (String) -> Unit,
+    onDeleteClick: () -> Unit,
+    onConfirmClick: () -> Unit,
+    isConfirmEnabled: Boolean,
+    confirmLabel: String,
+    modifier: Modifier = Modifier
+) {
+    val keys = listOf(
+        listOf("1", "2", "3"),
+        listOf("4", "5", "6"),
+        listOf("7", "8", "9"),
+        listOf("BS", "0", confirmLabel)
+    )
+
+    Column(
+        modifier = modifier.width(280.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        keys.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                row.forEach { key ->
+                    val isAction = key == confirmLabel
+                    val isDelete = key == "BS"
+                    
+                    if (key.isEmpty()) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    } else {
+                        Button(
+                            onClick = {
+                                when {
+                                    isDelete -> onDeleteClick()
+                                    isAction -> onConfirmClick()
+                                    else -> onNumberClick(key)
+                                }
+                            },
+                            modifier = Modifier.weight(1f).aspectRatio(1.2f),
+                            enabled = if (isAction) isConfirmEnabled else true,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isAction) NotionSafeGreen else NotionWhite,
+                                contentColor = if (isAction) Color.White else NotionTextPrimary,
+                                disabledContainerColor = NotionBorder
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            border = if (!isAction) BorderStroke(1.dp, NotionBorder) else null,
+                            contentPadding = PaddingValues(0.dp),
+                            elevation = null
+                        ) {
+                            if (isDelete) {
+                                Icon(Icons.AutoMirrored.Filled.Backspace, null, modifier = Modifier.size(20.dp))
+                            } else {
+                                Text(
+                                    text = key,
+                                    fontSize = if (isAction) 15.sp else 22.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -944,22 +1621,25 @@ fun HomeScreen(
         }
     }
 
-    val totalLendingAmount = lendings.filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
-    val currentAssets = assets.sumOf { it.amount } + totalLendingAmount
+    val totalLendingAmount = remember(lendings) { lendings.filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount } }
+    val currentAssets = remember(assets, totalLendingAmount) { assets.sumOf { it.amount } + totalLendingAmount }
 
     // 今月の支出を計算
-    val calendar = Calendar.getInstance().apply {
-        set(Calendar.DAY_OF_MONTH, 1)
-        set(Calendar.HOUR_OF_DAY, 0)
-        set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
+    val startOfMonth = remember {
+        Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_MONTH, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
     }
-    val startOfMonth = calendar.timeInMillis
     
-    val spentThisMonth = transactions
-        .filter { it.date >= startOfMonth && it.isExpense && it.category != "貸付" }
-        .sumOf { it.amount }
+    val spentThisMonth = remember(transactions, startOfMonth) {
+        transactions
+            .filter { it.date >= startOfMonth && it.isExpense && it.category != "貸付" }
+            .sumOf { it.amount }
+    }
 
     // 予算ゲージ用
     val currentGoal = goalSetting
@@ -977,7 +1657,10 @@ fun HomeScreen(
 
     val defaultBudget = budgets.sumOf { it.monthlyAmount }.let { if (it == 0) 100000L else it.toLong() }
     val monthlyBudget = goalMonthlyBudget ?: defaultBudget
-    val daysUntilReset = calendar.getActualMaximum(Calendar.DAY_OF_MONTH) - Calendar.getInstance().get(Calendar.DAY_OF_MONTH)
+    val daysUntilReset = remember {
+        val cal = Calendar.getInstance()
+        cal.getActualMaximum(Calendar.DAY_OF_MONTH) - cal.get(Calendar.DAY_OF_MONTH)
+    }
 
     Column(
         modifier = Modifier
@@ -1358,13 +2041,15 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         // 今月の支出をカテゴリ別に集計し、上位3件（貸付は除外）
-        val monthlyCategoryGroups = transactions
-            .filter { it.date >= startOfMonth && it.isExpense && it.category != "貸付" }
-            .groupBy { it.category }
-            .mapValues { it.value.sumOf { t -> t.amount } }
-            .toList()
-            .sortedByDescending { it.second }
-            .take(3)
+        val monthlyCategoryGroups = remember(transactions, startOfMonth) {
+            transactions
+                .filter { it.date >= startOfMonth && it.isExpense && it.category != "貸付" }
+                .groupBy { it.category }
+                .mapValues { it.value.sumOf { t -> t.amount } }
+                .toList()
+                .sortedByDescending { it.second }
+                .take(3)
+        }
 
         Box(
             modifier = Modifier
@@ -1454,10 +2139,12 @@ fun HomeScreen(
 fun InputScreen(
     dao: FinanceDao,
     gemini: GeminiNanoModel? = null,
+    ocrManager: OcrManager? = null,
     initialRecovery: LendingEntity? = null,
-    onRecoveryHandled: () -> Unit = {}
+    onRecoveryHandled: () -> Unit = {},
+    onExternalActivityLaunch: () -> Unit = {}
 ) {
-    val modes = listOf("支出", "収入", "貸付", "回収")
+    val modes = listOf("支出", "収入", "振替", "貸付", "回収")
     var selectedMode by remember { mutableStateOf(if (initialRecovery != null) "回収" else "支出") }
     
     var amountText by remember { mutableStateOf(if (initialRecovery != null) (initialRecovery.amount - initialRecovery.recoveredAmount).toString() else "") }
@@ -1466,7 +2153,9 @@ fun InputScreen(
     var selectedLending by remember { mutableStateOf(initialRecovery) }
     
     var selectedAssetEntity by remember { mutableStateOf<AssetEntity?>(null) }
+    var selectedToAssetEntity by remember { mutableStateOf<AssetEntity?>(null) }
     var showAssetSheet by remember { mutableStateOf(false) }
+    var showToAssetSheet by remember { mutableStateOf(false) }
     var showCategorySheet by remember { mutableStateOf(false) }
     var showLendingSheet by remember { mutableStateOf(false) }
     var selectedDate by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -1474,40 +2163,197 @@ fun InputScreen(
     val dateFormatter = remember { SimpleDateFormat("MM月dd日(E)", Locale.JAPAN) }
     var selectedCategory by remember { mutableStateOf<CategoryData?>(null) }
     var showKeypad by remember { mutableStateOf(false) }
+    var showOcrOptions by remember { mutableStateOf(false) }
+    
+    var isAnalyzingOcr by remember { mutableStateOf(false) }
+    var ocrPreviewUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
     val haptic = LocalHapticFeedback.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     val dbAssets by dao.getAllAssets().collectAsState(initial = emptyList())
+    val customCategories by dao.getAllCategories().collectAsState(initial = emptyList())
     val allLendings by dao.getAllLendings().collectAsState(initial = emptyList())
     val activeLendings = allLendings.filter { !it.isRecovered }
 
-    val expenseCategories = listOf(
-        CategoryData("食費", Icons.Default.ShoppingCart),
-        CategoryData("日用品", Icons.Default.Build),
-        CategoryData("交通費", Icons.Default.Place),
-        CategoryData("交際費", Icons.Default.Favorite),
-        CategoryData("娯楽", Icons.Default.Star),
-        CategoryData("美容", Icons.Default.Face),
-        CategoryData("健康", Icons.Default.Info),
-        CategoryData("その他", Icons.Default.MoreHoriz)
+    val tempImageUri = remember {
+        val file = File(context.cacheDir, "temp_ocr_image.jpg")
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }
+
+    val iconMap = mapOf(
+        "ShoppingCart" to Icons.Default.ShoppingCart,
+        "Build" to Icons.Default.Build,
+        "Place" to Icons.Default.Place,
+        "Favorite" to Icons.Default.Favorite,
+        "Star" to Icons.Default.Star,
+        "Face" to Icons.Default.Face,
+        "Info" to Icons.Default.Info,
+        "MoreHoriz" to Icons.Default.MoreHoriz,
+        "AccountBalance" to Icons.Default.AccountBalance
     )
-    val incomeCategories = listOf(
-        CategoryData("給与", Icons.Default.AccountBalance),
-        CategoryData("賞与", Icons.Default.Star),
-        CategoryData("副業", Icons.Default.Build),
-        CategoryData("お小遣い", Icons.Default.Favorite),
-        CategoryData("還付金", Icons.Default.Info),
-        CategoryData("その他", Icons.Default.MoreHoriz)
-    )
+
+    val expenseCategories = remember(customCategories) {
+        customCategories.filter { it.type == "EXPENSE" }.map { 
+            CategoryData(it.name, iconMap[it.iconName] ?: Icons.Default.MoreHoriz)
+        }.ifEmpty {
+            listOf(
+                CategoryData("食費", Icons.Default.ShoppingCart),
+                CategoryData("日用品", Icons.Default.Build),
+                CategoryData("交通費", Icons.Default.Place),
+                CategoryData("交際費", Icons.Default.Favorite),
+                CategoryData("娯楽", Icons.Default.Star),
+                CategoryData("美容", Icons.Default.Face),
+                CategoryData("健康", Icons.Default.Info),
+                CategoryData("その他", Icons.Default.MoreHoriz)
+            )
+        }
+    }
+
+    val incomeCategories = remember(customCategories) {
+        customCategories.filter { it.type == "INCOME" }.map {
+            CategoryData(it.name, iconMap[it.iconName] ?: Icons.Default.MoreHoriz)
+        }.ifEmpty {
+            listOf(
+                CategoryData("給与", Icons.Default.AccountBalance),
+                CategoryData("賞与", Icons.Default.Star),
+                CategoryData("副業", Icons.Default.Build),
+                CategoryData("お小遣い", Icons.Default.Favorite),
+                CategoryData("還付金", Icons.Default.Info),
+                CategoryData("その他", Icons.Default.MoreHoriz)
+            )
+        }
+    }
+
+    fun processOcrWithAi(uri: android.net.Uri) {
+        ocrPreviewUri = uri
+        isAnalyzingOcr = true
+        scope.launch {
+            try {
+                val fullText = ocrManager?.extractFullText(uri)
+                if (fullText.isNullOrBlank()) {
+                    snackbarHostState.showSnackbar("テキストを読み取れませんでした")
+                    return@launch
+                }
+
+                if (gemini == null || !gemini.isReady.value) {
+                    val amount = ocrManager?.extractAmount(uri)
+                    if (amount != null) amountText = amount.toString()
+                    snackbarHostState.showSnackbar("AIが準備中のため金額のみ抽出しました")
+                    return@launch
+                }
+
+                val assetNames = dbAssets.joinToString(", ") { it.name }
+                val categoryNames = expenseCategories.joinToString(", ") { it.name }
+                val today = SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN).format(Date())
+                
+                val prompt = """
+                    あなたは家計簿の入力補助を行うAIです。提供されたレシートのテキストから、正確に金額、日付、支払元資産、カテゴリ、品目（メモ）を抽出してください。
+                    
+                    【レシートテキスト】
+                    $fullText
+                    
+                    【支払元資産の候補】
+                    $assetNames
+                    
+                    【カテゴリの候補】
+                    $categoryNames
+                    
+                    【抽出ルール】
+                    1. 金額 (AMOUNT): 支払い合計金額を数値のみで。カンマは不要です。
+                    2. 日付 (DATE): レシートに記載された日付を YYYY/MM/DD 形式で。記載がない場合は今日の日付 ($today) にしてください。
+                    3. 資産 (ASSET): 候補リストの中から最も適切な支払元を選んでください。判断できない場合は「未選択」としてください。
+                    4. カテゴリ (CATEGORY): 候補リストの中から最も適切な支出カテゴリを「カテゴリの候補」の中から1つ選んでください。候補にない場合は「その他」としてください。
+                    5. 品目 (MEMO): 店名や主要な購入品を20文字以内で簡潔に。
+                    
+                    【出力形式】
+                    必ず以下の形式で、値のみを返してください。説明は一切不要です。
+                    AMOUNT: [数値]
+                    DATE: [YYYY/MM/DD]
+                    ASSET: [資産名]
+                    CATEGORY: [カテゴリ名]
+                    MEMO: [内容]
+                """.trimIndent()
+
+                val response = gemini.generateResponse(prompt)
+                
+                val lines = response.lines()
+                lines.forEach { line ->
+                    val trimmed = line.trim()
+                    when {
+                        trimmed.startsWith("AMOUNT:") -> {
+                            val value = trimmed.substringAfter("AMOUNT:").trim().filter { it.isDigit() }
+                            if (value.isNotEmpty()) amountText = value
+                        }
+                        trimmed.startsWith("DATE:") -> {
+                            val dateStr = trimmed.substringAfter("DATE:").trim()
+                            val format = SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN)
+                            try {
+                                val date = format.parse(dateStr)
+                                if (date != null) selectedDate = date.time
+                            } catch (e: Exception) {}
+                        }
+                        trimmed.startsWith("ASSET:") -> {
+                            val assetName = trimmed.substringAfter("ASSET:").trim()
+                            if (assetName != "未選択") {
+                                val foundAsset = dbAssets.find { it.name == assetName }
+                                if (foundAsset != null) {
+                                    selectedAssetEntity = foundAsset
+                                }
+                            }
+                        }
+                        trimmed.startsWith("CATEGORY:") -> {
+                            val categoryName = trimmed.substringAfter("CATEGORY:").trim()
+                            val foundCategory = expenseCategories.find { it.name == categoryName }
+                            if (foundCategory != null) {
+                                selectedCategory = foundCategory
+                            }
+                        }
+                        trimmed.startsWith("MEMO:") -> {
+                            val memo = trimmed.substringAfter("MEMO:").trim()
+                            if (memo != "[内容]" && memo.isNotEmpty()) memoText = memo
+                        }
+                    }
+                }
+                snackbarHostState.showSnackbar("AIによる分析が完了しました")
+            } catch (e: Exception) {
+                snackbarHostState.showSnackbar("分析中にエラーが発生しました: ${e.message}")
+            } finally {
+                isAnalyzingOcr = false
+            }
+        }
+    }
     
-    val categories = when (selectedMode) {
-        "支出" -> expenseCategories
-        "収入" -> incomeCategories
-        "貸付" -> listOf(CategoryData("貸付", Icons.Outlined.RequestPage))
-        "回収" -> listOf(CategoryData("回収", Icons.Default.Handshake))
-        else -> expenseCategories
+    val categories = remember(selectedMode, expenseCategories, incomeCategories) {
+        when (selectedMode) {
+            "支出" -> expenseCategories
+            "収入" -> incomeCategories
+            "振替" -> listOf(CategoryData("振替", Icons.AutoMirrored.Filled.CompareArrows))
+            "貸付" -> listOf(CategoryData("貸付", Icons.Outlined.RequestPage))
+            "回収" -> listOf(CategoryData("回収", Icons.Default.Handshake))
+            else -> expenseCategories
+        }
+    }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let {
+            processOcrWithAi(it)
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(TakePictureWithExplicitGrants()) { success ->
+        if (success) {
+            processOcrWithAi(tempImageUri)
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if (isGranted) {
+            onExternalActivityLaunch()
+            cameraLauncher.launch(tempImageUri)
+        }
     }
 
     // モード切替時に初期化
@@ -1520,17 +2366,21 @@ fun InputScreen(
     val accentColor = when (selectedMode) {
         "支出" -> Color(0xFFD32F2F)
         "収入" -> NotionSafeGreen
+        "振替" -> Color(0xFF1976D2)
         "貸付" -> Color(0xFFFB8C00)
         "回収" -> Color(0xFF00897B)
         else -> NotionTextPrimary
     }
 
-    val isSaveEnabled = amountText.isNotEmpty() && selectedAssetEntity != null && 
+    val isSaveEnabled = remember(amountText, selectedAssetEntity, selectedMode, personName, selectedToAssetEntity, selectedLending) {
+        amountText.isNotEmpty() && selectedAssetEntity != null && 
                        (selectedMode != "貸付" || personName.isNotEmpty()) &&
+                       (selectedMode != "振替" || (selectedToAssetEntity != null && selectedAssetEntity != selectedToAssetEntity)) &&
                        (selectedMode != "回収" || (selectedLending != null && run {
                            val valForCheck = evaluateExpression(amountText)
                            valForCheck > 0 && valForCheck <= (selectedLending!!.amount - selectedLending!!.recoveredAmount)
                        }))
+    }
 
     val onSave = {
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -1540,6 +2390,7 @@ fun InputScreen(
             val currentMode = selectedMode
             val currentMemo = memoText
             val currentCategory = selectedCategory?.name ?: "その他"
+            val toAsset = selectedToAssetEntity
             
             scope.launch {
                 when (currentMode) {
@@ -1565,6 +2416,30 @@ fun InputScreen(
                             snackbarHostState.showSnackbar(aiResponse.ifBlank { "記録しました！" })
                         } else {
                             snackbarHostState.showSnackbar("記録しました")
+                        }
+                    }
+                    "振替" -> {
+                        if (toAsset != null) {
+                            dao.insertTransaction(TransactionEntity(
+                                id = UUID.randomUUID().toString(),
+                                name = currentMemo.ifBlank { "${asset.name} ➡ ${toAsset.name}" },
+                                amount = amountValue,
+                                category = "振替",
+                                date = selectedDate,
+                                assetName = asset.name,
+                                isExpense = true,
+                                toAssetName = toAsset.name,
+                                isTransfer = true
+                            ))
+                            dao.updateAsset(asset.copy(
+                                amount = asset.amount - amountValue,
+                                lastUpdated = System.currentTimeMillis()
+                            ))
+                            dao.updateAsset(toAsset.copy(
+                                amount = toAsset.amount + amountValue,
+                                lastUpdated = System.currentTimeMillis()
+                            ))
+                            snackbarHostState.showSnackbar("振替を記録しました")
                         }
                     }
                     "貸付" -> {
@@ -1629,6 +2504,7 @@ fun InputScreen(
                 personName = ""
                 selectedLending = null
                 selectedAssetEntity = null
+                selectedToAssetEntity = null
                 showKeypad = false
                 onRecoveryHandled()
             }
@@ -1646,7 +2522,7 @@ fun InputScreen(
             // セグメントコントロール
             Column(modifier = Modifier.padding(horizontal = 24.dp)) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    modifier = Modifier.fillMaxWidth().height(44.dp).horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.Start
                 ) {
                     modes.forEach { mode ->
@@ -1696,20 +2572,90 @@ fun InputScreen(
                     color = accentColor.copy(alpha = 0.15f),
                     border = BorderStroke(1.5.dp, accentColor.copy(alpha = 0.5f))
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 28.dp, vertical = 28.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            text = if (amountText.isEmpty()) "¥0" else "¥$amountText",
-                            fontSize = 44.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = accentColor,
-                            letterSpacing = (-1).sp,
-                            textAlign = TextAlign.Center
+                    Box {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 28.dp, vertical = 28.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = if (amountText.isEmpty()) "¥0" else "¥$amountText",
+                                fontSize = 44.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = accentColor,
+                                letterSpacing = (-1).sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (selectedMode == "支出") {
+                                IconButton(
+                                    onClick = { showOcrOptions = true },
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .background(accentColor.copy(alpha = 0.1f), CircleShape)
+                                ) {
+                                    Icon(
+                                        Icons.Default.CameraAlt,
+                                        contentDescription = "OCR",
+                                        tint = accentColor
+                                    )
+                                }
+                            }
+                        }
+
+                        if (isAnalyzingOcr) {
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .background(Color.White.copy(alpha = 0.8f), RoundedCornerShape(20.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CircularProgressIndicator(
+                                        color = accentColor,
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 3.dp
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text("AIがレシートを分析中...", fontSize = 12.sp, color = accentColor, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (showOcrOptions) {
+                ModalBottomSheet(
+                    onDismissRequest = { showOcrOptions = false },
+                    containerColor = Color.White
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
+                        Text("レシート読み取り", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
+                        ListItem(
+                            headlineContent = { Text("カメラで撮影") },
+                            leadingContent = { Icon(Icons.Default.CameraAlt, null, tint = NotionSafeGreen) },
+                            modifier = Modifier.clickable {
+                                showOcrOptions = false
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                    onExternalActivityLaunch()
+                                    cameraLauncher.launch(tempImageUri)
+                                } else {
+                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
+                            }
+                        )
+                        HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                        ListItem(
+                            headlineContent = { Text("アルバムから選択") },
+                            leadingContent = { Icon(Icons.Default.PhotoLibrary, null, tint = NotionSafeGreen) },
+                            modifier = Modifier.clickable {
+                                showOcrOptions = false
+                                onExternalActivityLaunch()
+                                photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            }
                         )
                     }
                 }
@@ -1798,13 +2744,25 @@ fun InputScreen(
 
                 InputTile(
                     icon = Icons.Default.AccountBalanceWallet,
-                    label = if (selectedMode == "貸付") "貸し出し元" else if (selectedMode == "回収") "受け取り先" else "資産",
+                    label = if (selectedMode == "貸付") "貸し出し元" else if (selectedMode == "回収") "受け取り先" else if (selectedMode == "振替") "振替元" else "資産",
                     value = selectedAssetEntity?.name ?: "未選択",
                     onClick = { showAssetSheet = true },
                     accentColor = accentColor,
                     isPlaceholder = selectedAssetEntity == null,
                     enabled = isDetailEnabled
                 )
+
+                if (selectedMode == "振替") {
+                    InputTile(
+                        icon = Icons.AutoMirrored.Filled.CompareArrows,
+                        label = "振替先",
+                        value = selectedToAssetEntity?.name ?: "未選択",
+                        onClick = { showToAssetSheet = true },
+                        accentColor = accentColor,
+                        isPlaceholder = selectedToAssetEntity == null,
+                        enabled = isDetailEnabled
+                    )
+                }
 
                 // Memo Field
                 Surface(
@@ -1872,6 +2830,7 @@ fun InputScreen(
                     text = when(selectedMode) {
                         "支出" -> "支出を記録する"
                         "収入" -> "収入を記録する"
+                        "振替" -> "振替を記録する"
                         "貸付" -> "貸付を記録する"
                         "回収" -> "回収を記録する"
                         else -> "記録する"
@@ -1951,6 +2910,23 @@ fun InputScreen(
                     dbAssets.forEach { asset ->
                         Row(
                             modifier = Modifier.fillMaxWidth().clickable { selectedAssetEntity = asset; showAssetSheet = false }.padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(asset.name)
+                            Text("¥ ${String.format(Locale.JAPAN, "%,d", asset.amount)}")
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showToAssetSheet) {
+            ModalBottomSheet(onDismissRequest = { showToAssetSheet = false }) {
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
+                    Text("振替先資産を選択", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
+                    dbAssets.forEach { asset ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { selectedToAssetEntity = asset; showToAssetSheet = false }.padding(16.dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(asset.name)
@@ -2328,32 +3304,12 @@ fun AssetsScreen(
     val transactions by dao.getAllTransactions().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
 
-    // DBの状態を反映するリスト
-    val categories = remember { mutableStateListOf<AssetCategoryData>() }
-
-    // DBに資産データがある場合は同期
-    LaunchedEffect(assetsFromDb) {
-        categories.clear()
-        assetsFromDb.groupBy { it.category }.forEach { (categoryTitle, items) ->
-            val assetItems = items.map { 
-                AssetItemData(id = it.id, name = it.name, amount = it.amount, lastUpdated = it.lastUpdated)
-            }
-            val stateItems = mutableStateListOf<AssetItemData>()
-            stateItems.addAll(assetItems)
-            categories.add(AssetCategoryData(title = categoryTitle, items = stateItems))
-        }
-    }
-
     var showGroupSheet by remember { mutableStateOf(false) }
     var showAddItemDialog by remember { mutableStateOf(false) }
     var selectedGroupTitle by remember { mutableStateOf("") }
     var editNameText by remember { mutableStateOf("") }
     var editAmountText by remember { mutableStateOf("") }
 
-    var editingCategory by remember { mutableStateOf<AssetCategoryData?>(null) }
-    var editingItem by remember { mutableStateOf<Pair<AssetCategoryData, AssetItemData>?>(null) }
-    var itemToDelete by remember { mutableStateOf<Pair<AssetCategoryData, AssetItemData>?>(null) }
-    var categoryToDelete by remember { mutableStateOf<AssetCategoryData?>(null) }
     var transactionToDelete by remember { mutableStateOf<TransactionEntity?>(null) }
 
     val assetGroups = listOf("現金", "銀行", "電子マネー", "カード", "貯蓄", "投資", "貸付", "カードローン", "ローン", "保険", "デビットカード", "その他")
@@ -2946,72 +3902,6 @@ fun AssetsScreen(
             containerColor = Color.White,
             shape = RoundedCornerShape(12.dp)
         )
-    }
-
-    editingCategory?.let { category ->
-        NameEditDialog("カテゴリ名の変更", editNameText, onValueChange = { editNameText = it }, onDismiss = { editingCategory = null }) {
-            scope.launch {
-                dao.updateCategoryName(category.title, editNameText)
-            }
-            editingCategory = null
-        }
-    }
-
-    editingItem?.let { (category, item) ->
-        AlertDialog(
-            onDismissRequest = { editingItem = null },
-            title = { Text("項目の編集", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    OutlinedTextField(value = editNameText, onValueChange = { editNameText = it }, label = { Text("名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Spacer(modifier = Modifier.height(16.dp))
-                    OutlinedTextField(
-                        value = editAmountText, 
-                        onValueChange = { editAmountText = it }, 
-                        label = { Text("金額") }, 
-                        singleLine = true, 
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val amount = editAmountText.replace("−", "-").toIntOrNull() ?: item.amount
-                    scope.launch {
-                        dao.updateAsset(AssetEntity(
-                            id = item.id,
-                            name = editNameText,
-                            amount = amount,
-                            category = category.title,
-                            lastUpdated = System.currentTimeMillis()
-                        ))
-                    }
-                    editingItem = null
-                }) { Text("保存", color = NotionSafeGreen) }
-            },
-            dismissButton = { TextButton(onClick = { editingItem = null }) { Text("キャンセル") } },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(12.dp)
-        )
-    }
-
-    itemToDelete?.let { (category, item) ->
-        DeleteConfirmDialog("${item.name} を削除しますか？", onDismiss = { itemToDelete = null }) {
-            scope.launch {
-                dao.deleteAsset(AssetEntity(item.id, item.name, item.amount, category.title, item.lastUpdated))
-            }
-            itemToDelete = null
-        }
-    }
-
-    categoryToDelete?.let { category ->
-        DeleteConfirmDialog("カテゴリ「${category.title}」と内の全資産を削除しますか？", onDismiss = { categoryToDelete = null }) {
-            scope.launch {
-                dao.deleteAssetsByCategory(category.title)
-            }
-            categoryToDelete = null
-        }
     }
 
     transactionToDelete?.let { tx ->
@@ -3654,6 +4544,8 @@ fun GeneralSettingsScreen(
     onChangePassword: () -> Unit,
     onExportClick: () -> Unit,
     onImportClick: () -> Unit,
+    onCategoryManagementClick: () -> Unit,
+    onRecurringManagementClick: () -> Unit,
     onBack: () -> Unit
 ) {
     var showBackupHistory by remember { mutableStateOf(false) }
@@ -3676,6 +4568,7 @@ fun GeneralSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(NotionBackground)
+                .verticalScroll(rememberScrollState())
         ) {
             ScreenHeader(
                 title = "設定",
@@ -3688,115 +4581,134 @@ fun GeneralSettingsScreen(
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-                Text("セキュリティ", color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
-                
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, NotionBorder)
-                ) {
-                    Column {
-                        ListItem(
-                            headlineContent = { Text("アプリロック", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
-                            trailingContent = {
-                                Switch(
-                                    checked = appLockEnabled,
-                                    onCheckedChange = { onToggleAppLock(it) },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = NotionSafeGreen,
-                                        uncheckedThumbColor = Color.White,
-                                        uncheckedTrackColor = NotionBorder
-                                    )
+            Column(
+                modifier = Modifier.padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                // カスタマイズセクション
+                SettingsSection(title = "カスタマイズ") {
+                    SettingsItem(
+                        icon = Icons.Default.Category,
+                        title = "カテゴリ管理",
+                        description = "収支カテゴリの追加・編集・並べ替え",
+                        onClick = onCategoryManagementClick
+                    )
+                    HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon = Icons.Default.Autorenew,
+                        title = "固定費設定",
+                        description = "毎月の自動入力を設定・管理",
+                        onClick = onRecurringManagementClick
+                    )
+                }
+
+                // セキュリティセクション
+                SettingsSection(title = "セキュリティ") {
+                    SettingsItem(
+                        icon = Icons.Default.Lock,
+                        title = "アプリロック",
+                        description = "起動時にパスワード入力を求める",
+                        trailing = {
+                            Switch(
+                                checked = appLockEnabled,
+                                onCheckedChange = { onToggleAppLock(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = NotionSafeGreen,
+                                    uncheckedThumbColor = Color.White,
+                                    uncheckedTrackColor = NotionBorder
                                 )
-                            },
-                            leadingContent = { 
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .background(NotionSafeGreen.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.Lock, null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
-                                }
-                            }
-                        )
-                        if (appLockEnabled) {
-                            HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
-                            ListItem(
-                                headlineContent = { Text("パスワードの変更", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
-                                leadingContent = { Spacer(modifier = Modifier.width(40.dp)) },
-                                modifier = Modifier.clickable { onChangePassword() }
                             )
                         }
+                    )
+                    if (appLockEnabled) {
+                        HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                        SettingsItem(
+                            icon = Icons.Default.Password,
+                            title = "パスワードの変更",
+                            description = "現在のロック用パスワードを更新",
+                            onClick = onChangePassword
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Text("データ管理", color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+                // データ管理セクション
+                SettingsSection(title = "データ管理") {
+                    SettingsItem(
+                        icon = Icons.Default.Upload,
+                        title = "データのエクスポート",
+                        description = "現在のデータを暗号化してファイルに保存",
+                        onClick = onExportClick
+                    )
+                    HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon = Icons.Default.Download,
+                        title = "データのインポート",
+                        description = "バックアップファイルからデータを復旧",
+                        onClick = onImportClick
+                    )
+                    HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon = Icons.Default.History,
+                        title = "エクスポート履歴",
+                        description = "過去のバックアップ用パスワードを確認",
+                        onClick = { showBackupHistory = true }
+                    )
+                }
                 
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, NotionBorder)
-                ) {
-                    Column {
-                        ListItem(
-                            headlineContent = { Text("データのエクスポート", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
-                            supportingContent = { Text("現在のデータを暗号化して保存します", fontSize = 12.sp) },
-                            leadingContent = { 
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .background(NotionSafeGreen.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.Upload, null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
-                                }
-                            },
-                            modifier = Modifier.clickable { onExportClick() }
-                        )
-                        HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
-                        ListItem(
-                            headlineContent = { Text("データのインポート", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
-                            supportingContent = { Text("バックアップファイルからデータを復旧します", fontSize = 12.sp) },
-                            leadingContent = { 
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .background(NotionSafeGreen.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.Download, null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
-                                }
-                            },
-                            modifier = Modifier.clickable { onImportClick() }
-                        )
-                        HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
-                        ListItem(
-                            headlineContent = { Text("エクスポート履歴", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
-                            supportingContent = { Text("過去にエクスポートしたパスワードを確認します", fontSize = 12.sp) },
-                            leadingContent = { 
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .background(NotionSafeGreen.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.History, null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
-                                }
-                            },
-                            modifier = Modifier.clickable { showBackupHistory = true }
-                        )
-                    }
-                }
+                Spacer(modifier = Modifier.height(100.dp))
             }
         }
     }
+}
+
+@Composable
+fun SettingsSection(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column {
+        Text(
+            text = title,
+            color = NotionTextSecondary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = Color.White,
+            border = BorderStroke(1.dp, NotionBorder),
+            content = { Column(content = content) }
+        )
+    }
+}
+
+@Composable
+fun SettingsItem(
+    icon: ImageVector,
+    title: String,
+    description: String,
+    onClick: (() -> Unit)? = null,
+    trailing: @Composable (() -> Unit)? = null
+) {
+    ListItem(
+        headlineContent = { Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+        supportingContent = { Text(description, fontSize = 12.sp, color = NotionTextSecondary) },
+        leadingContent = { 
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(NotionSafeGreen.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
+            }
+        },
+        trailingContent = trailing,
+        modifier = if (onClick != null) Modifier.clickable { onClick() } else Modifier
+    )
 }
 
 @Composable
@@ -4847,26 +5759,6 @@ fun UnifiedAssetCardRow(
 }
 
 @Composable
-fun AssetListItemRow(item: AssetItemData, onClick: () -> Unit, onLongClick: () -> Unit) {
-    val haptic = LocalHapticFeedback.current
-    Row(
-        modifier = Modifier.fillMaxWidth().combinedClickable(
-            onClick = onClick,
-            onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLongClick() }
-        ).padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(item.name, color = NotionTextPrimary, fontSize = 14.sp)
-        Text(
-            "¥ ${String.format(Locale.JAPAN, "%,d", item.amount)}",
-            color = if (item.amount >= 0) NotionTextPrimary else Color(0xFFE57373),
-            fontSize = 14.sp, fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-@Composable
 fun AssetHistoryItem(
     name: String,
     amount: String,
@@ -4922,19 +5814,7 @@ fun AssetGroupItemRow(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-fun NameEditDialog(title: String, value: String, onValueChange: (String) -> Unit, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold) },
-        text = { OutlinedTextField(value = value, onValueChange = onValueChange, singleLine = true, modifier = Modifier.fillMaxWidth()) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("保存", color = NotionSafeGreen) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } },
-        containerColor = Color.White, shape = RoundedCornerShape(12.dp)
-    )
-}
-
-@Composable
-fun DeleteConfirmDialog(text: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+fun DeleteConfirmDialog(text: String, onDismiss: () -> Unit, onConfirm: () -> Unit = {}) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("削除の確認", fontSize = 18.sp, fontWeight = FontWeight.Bold) },

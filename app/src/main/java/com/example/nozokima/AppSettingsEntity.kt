@@ -7,5 +7,7 @@ import androidx.room.PrimaryKey
 data class AppSettingsEntity(
     @PrimaryKey val id: Int = 1,
     val appLockPassword: String? = null,
-    val isAppLockEnabled: Boolean = false
+    val isAppLockEnabled: Boolean = false,
+    val failedAttempts: Int = 0,
+    val lockoutUntil: Long = 0
 )

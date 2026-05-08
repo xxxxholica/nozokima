@@ -3,15 +3,14 @@ package com.example.nozokima
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "transactions")
-data class TransactionEntity(
+@Entity(tableName = "recurring_transactions")
+data class RecurringTransactionEntity(
     @PrimaryKey val id: String,
     val name: String,
     val amount: Int,
     val category: String,
-    val date: Long,
     val assetName: String,
-    val isExpense: Boolean = true,
-    val toAssetName: String? = null,
-    val isTransfer: Boolean = false
+    val dayOfMonth: Int,
+    val isExpense: Boolean,
+    val lastProcessedDate: Long = 0L
 )
