@@ -8,13 +8,14 @@ import android.content.Intent
 import android.content.ClipData
 import android.Manifest
 import androidx.core.content.ContextCompat
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
+import androidx.biometric.BiometricPrompt
+import androidx.biometric.BiometricManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.compose.setContent
 import androidx.core.content.FileProvider
 import java.io.File
 import androidx.compose.animation.*
@@ -47,7 +48,6 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
@@ -75,7 +76,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.google.mlkit.genai.common.FeatureStatus
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -146,12 +146,55 @@ data class ChatMessage(
     val isUser: Boolean = true
 )
 
+data class SavedRecordInfo(
+    val amount: Int,
+    val mode: String,
+    val category: String? = null,
+    val assetName: String,
+    val memo: String,
+    val aiAdvice: String? = null
+)
+
 // --- メインアクティビティ ---
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private val db by lazy { (application as NozokimaApplication).database }
     private val gemini by lazy { (application as NozokimaApplication).geminiModel }
     private val ocrManager by lazy { OcrManager(this) }
+
+    private fun showBiometricPrompt(
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit = {}
+    ) {
+        val executor = ContextCompat.getMainExecutor(this)
+        val biometricPrompt = BiometricPrompt(this, executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    onSuccess()
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    if (errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON && errorCode != BiometricPrompt.ERROR_USER_CANCELED) {
+                        onError(errString.toString())
+                    }
+                }
+            })
+
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("生体認証")
+            .setSubtitle("ロックを解除してください")
+            .setNegativeButtonText("パスワードを使用")
+            .build()
+
+        biometricPrompt.authenticate(promptInfo)
+    }
+
+    private fun isBiometricAvailable(): Boolean {
+        val biometricManager = BiometricManager.from(this)
+        return biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -173,6 +216,7 @@ class MainActivity : ComponentActivity() {
             }
             var selectedTab by remember { mutableIntStateOf(0) }
             var consultingTransaction by remember { mutableStateOf<Transaction?>(null) }
+            var initialHomeAdviceText by remember { mutableStateOf<String?>(null) }
             var recoveryLending by remember { mutableStateOf<LendingEntity?>(null) }
             var initialAssetCategoryFilter by remember { mutableStateOf<String?>(null) }
             var isGoalKeypadVisible by remember { mutableStateOf(false) }
@@ -327,7 +371,7 @@ class MainActivity : ComponentActivity() {
                             result += chunk
                             homeAiText = result
                         }
-                    } catch (e: Exception) {
+                    } catch (ignore: Exception) {
                         // エラーハンドリング（必要ならメッセージを表示）
                     }
                 }
@@ -374,7 +418,7 @@ class MainActivity : ComponentActivity() {
                             result += chunk
                             goalAiText = result
                         }
-                    } catch (e: Exception) {
+                    } catch (ignore: Exception) {
                         // エラーハンドリング
                     }
                 }
@@ -590,7 +634,10 @@ class MainActivity : ComponentActivity() {
                                         isDisableMode -> {
                                             if (currentPasswordInput == appSettings?.appLockPassword) {
                                                 scope.launch {
-                                                    dao.upsertAppSettings(appSettings!!.copy(isAppLockEnabled = false))
+                                                    dao.upsertAppSettings(appSettings!!.copy(
+                                                        isAppLockEnabled = false,
+                                                        isBiometricEnabled = false
+                                                    ))
                                                     showAppLockPasswordDialog = false
                                                 }
                                             } else {
@@ -740,7 +787,7 @@ class MainActivity : ComponentActivity() {
                         TextButton(
                             enabled = passwordText.length >= 8,
                             onClick = {
-                                if (backupMode != "export" && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                if (backupMode != "export") {
                                     autofillManager?.commit()
                                 }
                                 backupPassword = passwordText
@@ -791,6 +838,18 @@ class MainActivity : ComponentActivity() {
                                 val current = appSettings ?: AppSettingsEntity()
                                 dao.upsertAppSettings(current.copy(failedAttempts = 0, lockoutUntil = 0L))
                             }
+                        },
+                        isBiometricEnabled = appSettings?.isBiometricEnabled == true,
+                        onBiometricClick = {
+                            showBiometricPrompt(
+                                onSuccess = {
+                                    scope.launch {
+                                        val current = appSettings ?: AppSettingsEntity()
+                                        dao.upsertAppSettings(current.copy(failedAttempts = 0, lockoutUntil = 0L))
+                                    }
+                                    isAppLocked = false
+                                }
+                            )
                         }
                     )
                 } else {
@@ -829,7 +888,7 @@ class MainActivity : ComponentActivity() {
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .navigationBarsPadding()
-                                                .height(72.dp)
+                                                .height(80.dp)
                                         )
                                     }
                                 }
@@ -842,6 +901,10 @@ class MainActivity : ComponentActivity() {
                                                 gemini = gemini,
                                                 onConsultClick = { tx ->
                                                     consultingTransaction = tx
+                                                    selectedTab = 3
+                                                },
+                                                onAiAdviceClick = { advice ->
+                                                    initialHomeAdviceText = advice
                                                     selectedTab = 3
                                                 },
                                                 onNavigateToSettings = {
@@ -888,6 +951,8 @@ class MainActivity : ComponentActivity() {
                                                 onSessionSelected = { currentChatSessionId = it },
                                                 initialTransaction = consultingTransaction,
                                                 onClearConsultation = { consultingTransaction = null },
+                                                initialHomeAdviceText = initialHomeAdviceText,
+                                                onClearHomeAdvice = { initialHomeAdviceText = null },
                                                 modifier = Modifier
                                                     .fillMaxSize()
                                                     .padding(innerPadding)
@@ -918,6 +983,14 @@ class MainActivity : ComponentActivity() {
                                                         showAppLockPasswordDialog = true
                                                     }
                                                 },
+                                                biometricEnabled = appSettings?.isBiometricEnabled == true,
+                                                onToggleBiometric = { enabled ->
+                                                    scope.launch {
+                                                        val current = appSettings ?: AppSettingsEntity()
+                                                        dao.upsertAppSettings(current.copy(isBiometricEnabled = enabled))
+                                                    }
+                                                },
+                                                isBiometricAvailable = isBiometricAvailable(),
                                                 onChangePassword = {
                                                     appLockDialogMode = "change"
                                                     showAppLockPasswordDialog = true
@@ -949,7 +1022,7 @@ class MainActivity : ComponentActivity() {
                             SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp))
 
                             // FloatingNavBarをDrawerの下（およびそのScrimの下）に配置
-                            if (!isKeyboardVisible && !isGoalKeypadVisible && selectedTab < 5) {
+                            if (!isKeyboardVisible && !isGoalKeypadVisible && selectedTab <= 5) {
                                 FloatingNavBar(
                                     selectedTab = selectedTab,
                                     onTabSelected = { index ->
@@ -1325,7 +1398,9 @@ fun AppLockScreen(
     failedAttempts: Int,
     lockoutUntil: Long,
     onFailedAttempt: (Int, Long) -> Unit,
-    onSuccessfulUnlock: () -> Unit
+    onSuccessfulUnlock: () -> Unit,
+    isBiometricEnabled: Boolean = false,
+    onBiometricClick: () -> Unit = {}
 ) {
     var inputPassword by remember { mutableStateOf("") }
     var isError by remember { mutableStateOf(false) }
@@ -1341,6 +1416,28 @@ fun AppLockScreen(
         }
     }
 
+    // アプリが前面に戻った際や起動時に自動で生体認証を起動
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, isBiometricEnabled, isLockedOut) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (isBiometricEnabled && !isLockedOut) {
+                    onBiometricClick()
+                }
+            }
+        }
+        lifecycle.addObserver(observer)
+        // 表示された時点で既にRESUMEDなら即座に実行
+        if (lifecycle.currentState == Lifecycle.State.RESUMED) {
+            if (isBiometricEnabled && !isLockedOut) {
+                onBiometricClick()
+            }
+        }
+        onDispose {
+            lifecycle.removeObserver(observer)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1349,12 +1446,22 @@ fun AppLockScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            imageVector = if (isLockedOut) Icons.Default.Timer else Icons.Default.Lock,
-            contentDescription = null,
-            tint = if (isLockedOut) Color(0xFFE57373) else NotionSafeGreen,
-            modifier = Modifier.size(64.dp)
-        )
+        Box(
+            modifier = Modifier.size(64.dp).then(
+                if (isBiometricEnabled && !isLockedOut) Modifier.clickable { onBiometricClick() } else Modifier
+            ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = when {
+                    isLockedOut -> Icons.Default.Timer
+                    else -> Icons.Default.Lock
+                },
+                contentDescription = null,
+                tint = if (isLockedOut) Color(0xFFE57373) else NotionSafeGreen,
+                modifier = Modifier.size(64.dp)
+            )
+        }
         Spacer(modifier = Modifier.height(24.dp))
         Text(
             text = if (isLockedOut) "入力を一時制限しています" else "アプリはロックされています",
@@ -1372,7 +1479,7 @@ fun AppLockScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         
         if (!isLockedOut) {
             Row(
@@ -1397,7 +1504,7 @@ fun AppLockScreen(
             Spacer(Modifier.height(16.dp)) // Maintain height occupied by indicators
         }
         
-        Box(modifier = Modifier.height(32.dp).padding(top = 16.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.height(24.dp), contentAlignment = Alignment.Center) {
             if (isError && !isLockedOut) {
                 Text(
                     text = "パスワードが正しくありません (残り ${3 - failedAttempts} 回)",
@@ -1407,7 +1514,7 @@ fun AppLockScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         PinKeypad(
             onNumberClick = { num ->
@@ -1440,6 +1547,21 @@ fun AppLockScreen(
             isConfirmEnabled = inputPassword.length >= 4 && !isLockedOut,
             confirmLabel = "解除"
         )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        TextButton(
+            onClick = onBiometricClick,
+            enabled = isBiometricEnabled && !isLockedOut,
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = NotionSafeGreen,
+                disabledContentColor = NotionTextSecondary.copy(alpha = 0.4f)
+            )
+        ) {
+            Icon(Icons.Default.Fingerprint, null, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("生体認証を使用", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
@@ -1520,72 +1642,93 @@ fun FloatingNavBar(
     onTabSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val items = listOf("ホーム", "記録", "資産状況", "AI相談", "目標")
+    val items = listOf("ホーム", "記録", "資産状況", "AI相談", "目標", "設定")
     val selectedIcons = listOf(
         Icons.Filled.Home,
         Icons.Filled.AddCircle,
         Icons.Filled.BarChart,
         Icons.AutoMirrored.Filled.Chat,
-        Icons.Filled.TrackChanges
+        Icons.Filled.TrackChanges,
+        Icons.Filled.Settings
     )
     val unselectedIcons = listOf(
         Icons.Outlined.Home,
         Icons.Outlined.AddCircle,
         Icons.Outlined.BarChart,
         Icons.AutoMirrored.Outlined.Chat,
-        Icons.Outlined.TrackChanges
+        Icons.Outlined.TrackChanges,
+        Icons.Outlined.Settings
     )
 
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .background(
+                androidx.compose.ui.graphics.Brush.verticalGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        NotionBackground.copy(alpha = 0.5f),
+                        NotionBackground
+                    )
+                )
+            )
             .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 24.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .shadow(
-                    elevation = 24.dp,
-                    shape = RoundedCornerShape(36.dp),
-                    ambientColor = Color(0x22000000),
-                    spotColor = Color(0x33000000)
+                    elevation = 12.dp,
+                    shape = RoundedCornerShape(12.dp),
+                    ambientColor = Color(0x11000000),
+                    spotColor = Color(0x22000000)
                 )
-                .background(NotionWhite, RoundedCornerShape(36.dp))
-                .border(1.dp, NotionBorder, RoundedCornerShape(36.dp))
-                .padding(horizontal = 6.dp, vertical = 8.dp),
+                .background(NotionWhite, RoundedCornerShape(12.dp))
+                .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
+                .padding(horizontal = 4.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
             items.forEachIndexed { index, label ->
                 val isSelected = selectedTab == index
+                
+                // 目標(index 4)と設定(index 5)の間に縦線を入れる
+                if (index == 5) {
+                    Box(
+                        modifier = Modifier
+                            .height(24.dp)
+                            .width(1.dp)
+                            .background(NotionBorder)
+                    )
+                }
+
                 Box(
                     modifier = Modifier
-                        .weight(1f)
                         .padding(vertical = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     // アイコン＋ラベルをまとめてピルで囲む（選択範囲と強調範囲を一致させる）
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
                                 color = if (isSelected) Color(0xFFD6F0EB) else Color.Transparent,
-                                shape = RoundedCornerShape(20.dp)
+                                shape = RoundedCornerShape(12.dp)
                             )
                             .clickable(
                                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                                 indication = null
                             ) { onTabSelected(index) }
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = if (isSelected) selectedIcons[index] else unselectedIcons[index],
                             contentDescription = label,
                             tint = if (isSelected) NotionSafeGreen else NotionTextSecondary,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
@@ -1601,6 +1744,7 @@ fun HomeScreen(
     dao: FinanceDao,
     gemini: GeminiNanoModel? = null,
     onConsultClick: (Transaction) -> Unit = {},
+    onAiAdviceClick: (String) -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
     onCategoryClick: (String) -> Unit = {},
     homeAiText: String = "",
@@ -1615,10 +1759,28 @@ fun HomeScreen(
     val greeting = remember {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         when (hour) {
-            in 5..10 -> "おはようございます"
-            in 11..17 -> "こんにちは"
-            else -> "こんばんは"
-        }
+            in 5..10 -> listOf(
+                "Good morning! ☀️", "おはようございます 🌅", "Bonjour 🥐", "¡Buenos días! 🌻",
+                "Guten Morgen 🥨", "좋은 아침! 🐣", "早安 ✨", "Buongiorno ☕", "Bom dia 🌿", "God morgon ☁️"
+            )
+            in 11..16 -> listOf(
+                "Hello! 👋", "こんにちは 😊", "Salut! 🇫🇷", "¡Hola! 🍊", "Ciao! 🍕",
+                "你好 🌈", "Hallo! 🍺", "안녕하세요 🍃", "Hi there! 🎈", "Hi! ✨"
+            )
+            in 17..20 -> listOf(
+                "Good evening ✨", "こんばんは 🌆", "Bonsoir 🍷", "¡Buenas tardes! 🌇", "Buonasera 🌙",
+                "Guten Abend 🥨", "晚上好 🍵", "저녁이에요 🌿", "Boa tarde 🌊", "Relax time 🛋️"
+            )
+            else -> listOf(
+                "Good night 🌙", "おやすみなさい 💤", "Bonne nuit 🧸", "¡Buenas noches! ⭐", "Buonanotte 🌌",
+                "Gute Nacht 😴", "晚安 ✨", "안녕히 주무세요 ☁️", "Sweet dreams 🦄", "Night 🌑"
+            )
+        }.random()
+    }
+
+    var progressTrigger by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        progressTrigger = true
     }
 
     val totalLendingAmount = remember(lendings) { lendings.filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount } }
@@ -1683,13 +1845,6 @@ fun HomeScreen(
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.5).sp
             )
-            IconButton(onClick = onNavigateToSettings) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "Settings",
-                    tint = NotionTextSecondary
-                )
-            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -1767,9 +1922,14 @@ fun HomeScreen(
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     // 予算バーは「使った割合」で左から伸びるカウントアップ表示
-                    val spentProgress = if (monthlyBudget > 0) (spentThisMonth.toFloat() / monthlyBudget.toFloat()).coerceIn(0f, 1f) else 0f
+                    val spentProgress = if (progressTrigger && monthlyBudget > 0) (spentThisMonth.toFloat() / monthlyBudget.toFloat()).coerceIn(0f, 1f) else 0f
+                    val animatedSpentProgress by animateFloatAsState(
+                        targetValue = spentProgress,
+                        animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+                        label = "spentProgress"
+                    )
                     LinearProgressIndicator(
-                        progress = { spentProgress },
+                        progress = { animatedSpentProgress },
                         modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)),
                         color = progressColor,
                         trackColor = NotionBorder,
@@ -1782,7 +1942,12 @@ fun HomeScreen(
                     val goalForCard = goalSetting
                     val hasGoal = goalForCard != null && goalForCard.targetAmount > 0 && goalForCard.showResults
                     val actualAssetsForGoal = assets.sumOf { it.amount }.toLong()
-                    val goalProgressRatio = if (hasGoal) (actualAssetsForGoal.toFloat() / goalForCard!!.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
+                    val goalProgressRatio = if (progressTrigger && hasGoal) (actualAssetsForGoal.toFloat() / goalForCard!!.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
+                    val animatedGoalProgress by animateFloatAsState(
+                        targetValue = goalProgressRatio,
+                        animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+                        label = "goalProgress"
+                    )
                     val goalDisplayTitle = when {
                         !hasGoal -> "目標未設定"
                         goalForCard!!.title.isNotEmpty() -> goalForCard.title
@@ -1814,7 +1979,7 @@ fun HomeScreen(
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     LinearProgressIndicator(
-                        progress = { goalProgressRatio },
+                        progress = { animatedGoalProgress },
                         modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)),
                         color = goalBarColor,
                         trackColor = goalTrackColor,
@@ -1837,13 +2002,13 @@ fun HomeScreen(
                         isGeneratingNow   -> "分析中..."
                         else              -> null
                     }
-                    val displayText = homeAiText
 
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 128.dp) // 縦幅を確保
+                            .heightIn(min = 160.dp) // 最初から高さを確保してレイアウトの跳ねを防止
                             .background(Color(0xFFF5F5F5), RoundedCornerShape(10.dp))
+                            .then(if (homeAiText.isNotEmpty() && !aiIsGenerating) Modifier.clickable { onAiAdviceClick(homeAiText) } else Modifier)
                             .padding(12.dp)
                     ) {
                         Column {
@@ -1898,15 +2063,15 @@ fun HomeScreen(
                                 Spacer(modifier = Modifier.height(6.dp))
                             }
                             // ステータスラベル or テキスト
-                            if (statusLabel != null) {
+            if (statusLabel != null) {
                                 Text(
                                     text = statusLabel,
                                     color = NotionTextSecondary.copy(alpha = 0.6f),
                                     fontSize = 12.sp
                                 )
-                            } else if (displayText.isNotEmpty()) {
+                            } else if (homeAiText.isNotEmpty()) {
                                 Text(
-                                    text = displayText,
+                                    text = homeAiText,
                                     color = NotionTextSecondary,
                                     fontSize = 12.sp,
                                     lineHeight = 18.sp
@@ -2166,7 +2331,7 @@ fun InputScreen(
     var showOcrOptions by remember { mutableStateOf(false) }
     
     var isAnalyzingOcr by remember { mutableStateOf(false) }
-    var ocrPreviewUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var successInfo by remember { mutableStateOf<SavedRecordInfo?>(null) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -2228,7 +2393,6 @@ fun InputScreen(
     }
 
     fun processOcrWithAi(uri: android.net.Uri) {
-        ocrPreviewUri = uri
         isAnalyzingOcr = true
         scope.launch {
             try {
@@ -2392,6 +2556,16 @@ fun InputScreen(
             val currentCategory = selectedCategory?.name ?: "その他"
             val toAsset = selectedToAssetEntity
             
+            // 成功オーバーレイを即座に表示してレスポンスを改善
+            successInfo = SavedRecordInfo(
+                amount = amountValue,
+                mode = currentMode,
+                category = if (currentMode == "支出" || currentMode == "収入") currentCategory else null,
+                assetName = asset.name,
+                memo = currentMemo.ifBlank { currentCategory },
+                aiAdvice = null
+            )
+
             scope.launch {
                 when (currentMode) {
                     "支出", "収入" -> {
@@ -2409,14 +2583,6 @@ fun InputScreen(
                             amount = if (isExp) asset.amount - amountValue else asset.amount + amountValue,
                             lastUpdated = System.currentTimeMillis()
                         ))
-                        
-                        if (gemini != null && isExp) {
-                            val prompt = "私は今、$amountValue 円を「$currentCategory」に使いました（メモ：$currentMemo）。これに対する1行の短い節約アドバイスをください。"
-                            val aiResponse = gemini.generateResponse(prompt)
-                            snackbarHostState.showSnackbar(aiResponse.ifBlank { "記録しました！" })
-                        } else {
-                            snackbarHostState.showSnackbar("記録しました")
-                        }
                     }
                     "振替" -> {
                         if (toAsset != null) {
@@ -2427,7 +2593,7 @@ fun InputScreen(
                                 category = "振替",
                                 date = selectedDate,
                                 assetName = asset.name,
-                                isExpense = true,
+                                isExpense = false,
                                 toAssetName = toAsset.name,
                                 isTransfer = true
                             ))
@@ -2439,7 +2605,6 @@ fun InputScreen(
                                 amount = toAsset.amount + amountValue,
                                 lastUpdated = System.currentTimeMillis()
                             ))
-                            snackbarHostState.showSnackbar("振替を記録しました")
                         }
                     }
                     "貸付" -> {
@@ -2465,7 +2630,6 @@ fun InputScreen(
                             amount = asset.amount - amountValue,
                             lastUpdated = System.currentTimeMillis()
                         ))
-                        snackbarHostState.showSnackbar("貸付を記録しました")
                     }
                     "回収" -> {
                         selectedLending?.let { lending ->
@@ -2493,7 +2657,19 @@ fun InputScreen(
                                 amount = asset.amount + currentRecoveryAmount,
                                 lastUpdated = System.currentTimeMillis()
                             ))
-                            snackbarHostState.showSnackbar(if (isFullyRecovered) "全額回収しました" else "一部回収を記録しました")
+                        }
+                    }
+                }
+                
+                // AIアドバイスをバックグラウンドで生成して反映
+                if (gemini != null && currentMode == "支出") {
+                    scope.launch {
+                        try {
+                            val prompt = "私は今、$amountValue 円を「$currentCategory」に使いました（メモ：$currentMemo）。これに対する1行の短い節約アドバイスをください。挨拶は不要です。"
+                            val advice = gemini.generateResponse(prompt)
+                            successInfo = successInfo?.copy(aiAdvice = advice)
+                        } catch (e: Exception) {
+                            successInfo = successInfo?.copy(aiAdvice = "記録が完了しました！")
                         }
                     }
                 }
@@ -2979,6 +3155,159 @@ fun InputScreen(
                 }
             ) { DatePicker(state = datePickerState) }
         }
+
+        // 成功オーバーレイ
+        successInfo?.let { info ->
+            SuccessOverlay(
+                info = info,
+                onDismiss = { successInfo = null }
+            )
+        }
+    }
+}
+
+@Composable
+fun SuccessOverlay(
+    info: SavedRecordInfo,
+    onDismiss: () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    val displayDuration = 5000L // 5秒
+    var progress by remember { mutableFloatStateOf(1f) }
+    
+    LaunchedEffect(Unit) {
+        visible = true
+        val startTime = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startTime < displayDuration) {
+            val elapsed = System.currentTimeMillis() - startTime
+            progress = 1f - (elapsed.toFloat() / displayDuration)
+            kotlinx.coroutines.delay(50)
+        }
+        visible = false
+        kotlinx.coroutines.delay(400)
+        onDismiss()
+    }
+
+    val accentColor = when (info.mode) {
+        "支出" -> Color(0xFFD32F2F)
+        "収入" -> NotionSafeGreen
+        "振替" -> Color(0xFF1976D2)
+        "貸付" -> Color(0xFFFB8C00)
+        "回収" -> Color(0xFF00897B)
+        else -> NotionSafeGreen
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + scaleIn(initialScale = 0.9f),
+        exit = fadeOut() + scaleOut(targetScale = 1.1f)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.White),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(32.dp)
+            ) {
+                // チェックマーク
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .background(accentColor.copy(alpha = 0.1f), CircleShape)
+                        .border(4.dp, accentColor, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(60.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text(
+                    text = info.memo,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = NotionTextPrimary,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "¥ ${String.format(Locale.JAPAN, "%,d", info.amount)}",
+                    fontSize = 42.sp,
+                    fontWeight = FontWeight.Black,
+                    color = accentColor,
+                    letterSpacing = (-1).sp
+                )
+
+                if (info.mode == "支出") {
+                    Spacer(modifier = Modifier.height(48.dp))
+                    Surface(
+                        color = Color(0xFFF9F9F9),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, NotionBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AutoAwesome, null, tint = NotionSafeGreen, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("覗き魔 AI アドバイス", fontSize = 12.sp, color = NotionSafeGreen, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            if (info.aiAdvice != null) {
+                                Text(
+                                    text = info.aiAdvice,
+                                    fontSize = 14.sp,
+                                    color = NotionTextPrimary,
+                                    lineHeight = 20.sp
+                                )
+                            } else {
+                                ThinkingAnimation()
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(64.dp))
+                
+                // 戻るボタン (インジケーター付き)
+                Box(
+                    modifier = Modifier
+                        .width(200.dp)
+                        .height(50.dp)
+                        .clip(RoundedCornerShape(25.dp))
+                        .background(NotionBorder.copy(alpha = 0.3f))
+                        .clickable { onDismiss() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    // プログレス背景
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress)
+                            .fillMaxHeight()
+                            .align(Alignment.CenterStart)
+                            .background(accentColor.copy(alpha = 0.2f))
+                    )
+                    
+                    Text(
+                        text = "戻る",
+                        color = accentColor,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -3214,7 +3543,7 @@ fun CustomKeypad(
                                 Icons.AutoMirrored.Filled.Backspace,
                                 contentDescription = "削除",
                                 modifier = Modifier.size(20.dp),
-                                tint = if (isAction) Color.White else NotionTextPrimary
+                                tint = NotionTextPrimary
                             )
                         } else {
                             Text(
@@ -3275,18 +3604,6 @@ fun evaluateExpression(expression: String): Int {
     }
 }
 
-private fun calculatePasswordStrength(password: String): Float {
-    if (password.isEmpty()) return 0f
-    var score = 0
-    if (password.length >= 8) score++
-    if (password.length >= 12) score++
-    if (password.any { it.isUpperCase() }) score++
-    if (password.any { it.isLowerCase() }) score++
-    if (password.any { it.isDigit() }) score++
-    if (password.any { !it.isLetterOrDigit() }) score++
-    return score.toFloat() / 6f
-}
-
 private fun generateSecurePassword(): String {
     val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+"
     return (1..16).map { chars.random() }.joinToString("")
@@ -3314,12 +3631,11 @@ fun AssetsScreen(
 
     val assetGroups = listOf("現金", "銀行", "電子マネー", "カード", "貯蓄", "投資", "貸付", "カードローン", "ローン", "保険", "デビットカード", "その他")
     
-    var selectedTab by remember { mutableStateOf(0) } // 0: 履歴（デフォルト）, 1: 残高内訳
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: 履歴（デフォルト）, 1: 残高内訳
     var selectedHistoryAssetName by remember { mutableStateOf<String?>(null) }
-    var selectedHistoryAssetCategory by remember { mutableStateOf<String?>(null) }
 
     // 履歴フィルタ用の状態変数
-    var selectedHistoryCategory by remember(initialCategoryFilter) { mutableStateOf<String?>(initialCategoryFilter) }
+    var selectedHistoryCategory by remember(initialCategoryFilter) { mutableStateOf(initialCategoryFilter) }
     var selectedExpenseFilter by remember { mutableStateOf("全て") } // "全て", "支出のみ", "収入のみ"
     var selectedStartDate by remember { mutableLongStateOf(0L) }
     var selectedEndDate by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -3333,11 +3649,10 @@ fun AssetsScreen(
     var editingAssetEntity by remember { mutableStateOf<AssetEntity?>(null) }
     var assetEditName by remember { mutableStateOf("") }
     var assetEditCategory by remember { mutableStateOf("") }
-    var showAssetCategoryDropdown by remember { mutableStateOf(false) }
     var showAssetAmountEdit by remember { mutableStateOf(false) }
     var showAssetDeleteConfirm by remember { mutableStateOf(false) }
 
-    val assetCategoryOrder = remember(assetGroups) { assetGroups.withIndex().associate { it.value to it.index } }
+    val assetCategoryOrder = remember(assetGroups) { assetGroups.withIndex().associateBy({ it.value }, { it.index }) }
     val sortedAssets = assetsFromDb.sortedWith(
         compareBy<AssetEntity>(
             { assetCategoryOrder[it.category] ?: Int.MAX_VALUE },
@@ -3525,7 +3840,6 @@ fun AssetsScreen(
               val isAnyFilterActive = selectedHistoryAssetName != null || selectedHistoryCategory != null || selectedExpenseFilter != "全て" || selectedStartDate > 0L
               val resetAction: () -> Unit = {
                   selectedHistoryAssetName = null
-                  selectedHistoryAssetCategory = null
                   selectedHistoryCategory = null
                   selectedExpenseFilter = "全て"
                   selectedStartDate = 0L
@@ -3579,9 +3893,9 @@ fun AssetsScreen(
                                       }
                                   }
                                   DropdownMenu(expanded = showAssetFilterMenu, onDismissRequest = { showAssetFilterMenu = false }, modifier = Modifier.background(Color.White)) {
-                                      DropdownMenuItem(text = { Text("全て", fontSize = 13.sp, color = if (selectedHistoryAssetName == null) NotionSafeGreen else NotionTextPrimary, fontWeight = if (selectedHistoryAssetName == null) FontWeight.Bold else FontWeight.Normal) }, onClick = { selectedHistoryAssetName = null; selectedHistoryAssetCategory = null; showAssetFilterMenu = false })
+                                      DropdownMenuItem(text = { Text("全て", fontSize = 13.sp, color = if (selectedHistoryAssetName == null) NotionSafeGreen else NotionTextPrimary, fontWeight = if (selectedHistoryAssetName == null) FontWeight.Bold else FontWeight.Normal) }, onClick = { selectedHistoryAssetName = null; showAssetFilterMenu = false })
                                       assetsFromDb.sortedBy { it.name }.forEach { asset ->
-                                          DropdownMenuItem(text = { Text(asset.name, fontSize = 13.sp, color = if (selectedHistoryAssetName == asset.name) NotionSafeGreen else NotionTextPrimary, fontWeight = if (selectedHistoryAssetName == asset.name) FontWeight.Bold else FontWeight.Normal) }, onClick = { selectedHistoryAssetName = asset.name; selectedHistoryAssetCategory = asset.category; showAssetFilterMenu = false })
+                                          DropdownMenuItem(text = { Text(asset.name, fontSize = 13.sp, color = if (selectedHistoryAssetName == asset.name) NotionSafeGreen else NotionTextPrimary, fontWeight = if (selectedHistoryAssetName == asset.name) FontWeight.Bold else FontWeight.Normal) }, onClick = { selectedHistoryAssetName = asset.name; showAssetFilterMenu = false })
                                       }
                                   }
                               }
@@ -4028,8 +4342,18 @@ fun AssetsScreen(
 
 
 
+// --- プリセット質問 ---
+private val PRESET_QUESTIONS = listOf(
+    "今月の収支を分析して",
+    "節約のアドバイスをちょうだい",
+    "無駄遣いしていないかチェックして",
+    "今の資産で目標達成できる？",
+    "貸付金の状況を教えて"
+)
+
 @Composable
 fun ConsultationScreen(
+    modifier: Modifier = Modifier,
     dao: FinanceDao,
     gemini: GeminiNanoModel? = null,
     assets: List<AssetEntity> = emptyList(),
@@ -4041,11 +4365,13 @@ fun ConsultationScreen(
     onSessionSelected: (String?) -> Unit = {},
     initialTransaction: Transaction? = null,
     onClearConsultation: () -> Unit = {},
-    modifier: Modifier = Modifier
+    initialHomeAdviceText: String? = null,
+    onClearHomeAdvice: () -> Unit = {}
 ) {
     var inputText by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    var suggestedQuestions by remember { mutableStateOf(PRESET_QUESTIONS.shuffled().take(3)) }
 
     val messages by if (currentSessionId != null) {
         dao.getMessagesForSession(currentSessionId).collectAsState(initial = emptyList())
@@ -4060,16 +4386,63 @@ fun ConsultationScreen(
     val errorMsg by (gemini?.errorMessage?.collectAsState() ?: remember { mutableStateOf<String?>(null) })
     val isGenerating by (gemini?.isGenerating?.collectAsState() ?: remember { mutableStateOf(false) })
 
+    // --- サジェスト生成ロジック ---
+    fun generateSuggestions(currentMessages: List<ChatMessageEntity>) {
+        if (gemini == null || !isReady || isGenerating) return
+        scope.launch {
+            val assetContext = buildString {
+                if (assets.isNotEmpty()) {
+                    appendLine("【現在の資産状況】")
+                    assets.forEach { appendLine("- ${it.name}: ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})") }
+                }
+                val activeLendings = lendings.filter { !it.isRecovered }
+                if (activeLendings.isNotEmpty()) {
+                    appendLine("【貸付状況】")
+                    activeLendings.forEach { appendLine("- ${it.personName}への貸付: ¥${String.format(Locale.JAPAN, "%,d", it.amount - it.recoveredAmount)}") }
+                }
+            }
+            val historyContext = "【最近の会話】\n" + currentMessages.takeLast(5).joinToString("\n") {
+                "${if (it.isUser) "ユーザー" else "AI"}: ${it.text}"
+            }
+            val prompt = """
+                あなたは家計管理AIアシスタント「覗き魔AI」です。
+                これまでのユーザーとの会話や現在の資産状況を踏まえて、ユーザーが次に聞きそうな質問を3つ、日本語で20文字以内の短い文章で提案してください。
+                
+                $assetContext
+                
+                $historyContext
+                
+                出力形式は必ず以下のように、1行に1つの質問のみを記述してください。余計な説明や挨拶は不要です。
+                質問1
+                質問2
+                質問3
+            """.trimIndent()
+            
+            try {
+                val response = gemini.generateResponse(prompt)
+                suggestedQuestions = response.lines().filter { it.isNotBlank() }.take(3)
+            } catch (e: Exception) {
+                suggestedQuestions = emptyList()
+            }
+        }
+    }
+
+    // 画面表示時またはセッション初期化時にサジェストを更新
+    LaunchedEffect(currentSessionId) {
+        if (currentSessionId == null) {
+            suggestedQuestions = PRESET_QUESTIONS.shuffled().take(3)
+        }
+    }
+
     // 初期相談データの処理
-    LaunchedEffect(initialTransaction) {
+    LaunchedEffect(initialTransaction, initialHomeAdviceText) {
         if (initialTransaction != null) {
-            val tx = initialTransaction
-            val sessionTitle = "支出「${tx.name}」の相談"
+            val sessionTitle = "支出「${initialTransaction.name}」の相談"
             val sessionId = UUID.randomUUID().toString()
             
             scope.launch {
                 dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = sessionTitle, lastMessageAt = System.currentTimeMillis()))
-                val userMsg = "支出「${tx.name}」(¥${String.format(Locale.JAPAN, "%,d", tx.amount)})について相談したいです。"
+                val userMsg = "支出「${initialTransaction.name}」(¥${String.format(Locale.JAPAN, "%,d", initialTransaction.amount)})について相談したいです。"
                 dao.insertChatMessage(ChatMessageEntity(
                     sessionId = sessionId,
                     text = userMsg,
@@ -4120,13 +4493,85 @@ fun ConsultationScreen(
                             accumulatedText += chunk
                             dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = accumulatedText, isUser = false))
                         }
+                        // 生成完了後にサジェストを生成
+                        generateSuggestions(dao.getMessagesForSessionSync(sessionId))
                     } catch (e: Exception) {
                         dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "分析中にエラーが発生しました。", isUser = false))
                     }
                 } else {
                     dao.insertChatMessage(ChatMessageEntity(
                         sessionId = sessionId,
-                        text = "「${tx.name}」ですね。${tx.category}カテゴリの支出ですが、これは未来の自分への投資になりそうですか？それとも単なる浪費でしたか？",
+                        text = "「${initialTransaction.name}」ですね。${initialTransaction.category}カテゴリの支出ですが、これは未来の自分への投資になりそうですか？それとも単なる浪費でしたか？",
+                        isUser = false
+                    ))
+                }
+            }
+        } else if (initialHomeAdviceText != null) {
+            val sessionTitle = "家計分析の深掘り"
+            val sessionId = UUID.randomUUID().toString()
+            
+            scope.launch {
+                dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = sessionTitle, lastMessageAt = System.currentTimeMillis()))
+                val userMsg = "ホーム画面で提示された「$initialHomeAdviceText」というアドバイスについて、もっと詳しく教えてください。"
+                dao.insertChatMessage(ChatMessageEntity(
+                    sessionId = sessionId,
+                    text = userMsg,
+                    isUser = true
+                ))
+                
+                onSessionSelected(sessionId)
+                onClearHomeAdvice()
+
+                // AI応答の生成
+                if (gemini != null && isReady) {
+                    val assetContext = buildString {
+                        if (assets.isNotEmpty()) {
+                            appendLine("【現在の資産状況】")
+                            assets.forEach { appendLine("- ${it.name}: ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})") }
+                        }
+                        val activeLendings = lendings.filter { !it.isRecovered }
+                        if (activeLendings.isNotEmpty()) {
+                            appendLine("【貸付状況】")
+                            activeLendings.forEach { appendLine("- ${it.personName}への貸付: ¥${String.format(Locale.JAPAN, "%,d", it.amount - it.recoveredAmount)}") }
+                        }
+                        appendLine()
+                    }
+
+                    val recentTxContext = if (transactions.isNotEmpty()) {
+                        "【直近の支出記録】\n" + transactions.take(10).joinToString("\n") { 
+                            "- ${SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
+                        } + "\n\n"
+                    } else ""
+
+                    val fullPrompt = """
+                        あなたは家計管理AIアシスタント「覗き魔AI」です。
+                        ユーザーがホーム画面でのあなたのアドバイスについて深掘りした質問をしました。
+                        
+                        $assetContext
+                        $recentTxContext
+                        ユーザーの相談: $userMsg
+                        
+                        提示したアドバイスの意図や、具体的なアクションプラン、注意点などを日本語で親身に解説してください。
+                    """.trimIndent()
+
+                    val aiMsgId = UUID.randomUUID().toString()
+                    var accumulatedText = ""
+                    dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "...", isUser = false))
+
+                    try {
+                        gemini.generateResponseStream(fullPrompt).collect { chunk ->
+                            accumulatedText += chunk
+                            dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = accumulatedText, isUser = false))
+                        }
+                        // 生成完了後にサジェストを生成
+                        generateSuggestions(dao.getMessagesForSessionSync(sessionId))
+                    } catch (e: Exception) {
+                        dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "分析中にエラーが発生しました。", isUser = false))
+                    }
+                } else {
+                    dao.insertChatMessage(ChatMessageEntity(
+                        sessionId = sessionId,
+                        text = "あのアドバイスが気になりましたか？具体的にどの部分を詳しく知りたいですか？",
                         isUser = false
                     ))
                 }
@@ -4208,6 +4653,78 @@ fun ConsultationScreen(
                     Spacer(Modifier.height(16.dp))
                     Text("覗き魔 AI に相談しましょう", color = NotionTextPrimary, fontWeight = FontWeight.Bold)
                     Text("資産や支出について質問してください", color = NotionTextSecondary, fontSize = 14.sp)
+
+                    if (suggestedQuestions.isNotEmpty()) {
+                        Spacer(Modifier.height(20.dp))
+                        Column(
+                            modifier = Modifier.padding(horizontal = 24.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            suggestedQuestions.forEach { question ->
+                                SuggestionChip(
+                                    onClick = {
+                                        if (isReady && !isGenerating) {
+                                            val userMsg = question
+                                            scope.launch {
+                                                val sessionId = UUID.randomUUID().toString()
+                                                dao.insertChatMessage(ChatMessageEntity(sessionId = sessionId, text = userMsg, isUser = true))
+                                                dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = userMsg.take(20), lastMessageAt = System.currentTimeMillis()))
+                                                onSessionSelected(sessionId)
+                                                
+                                                val assetContext = buildString {
+                                                    if (assets.isNotEmpty()) {
+                                                        appendLine("【現在の資産状況】")
+                                                        assets.forEach { appendLine("- ${it.name}: ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})") }
+                                                    }
+                                                    val activeLendings = lendings.filter { !it.isRecovered }
+                                                    if (activeLendings.isNotEmpty()) {
+                                                        appendLine("【貸付状況】")
+                                                        activeLendings.forEach { appendLine("- ${it.personName}への貸付: ¥${String.format(Locale.JAPAN, "%,d", it.amount - it.recoveredAmount)}") }
+                                                    }
+                                                }
+                                                val recentTxContext = if (transactions.isNotEmpty()) {
+                                                    "【直近の支出記録】\n" + transactions.take(10).joinToString("\n") { 
+                                                        "- ${SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
+                                                    } + "\n\n"
+                                                } else ""
+                                                
+                                                val fullPrompt = """
+                                                    あなたは家計管理AIアシスタント「覗き魔AI」です。
+                                                    ユーザーの資産状況と支出履歴をもとに、親身かつ少し鋭い視点でアドバイスしてください。
+                                                    
+                                                    $assetContext
+                                                    $recentTxContext
+                                                    ユーザーの質問: $userMsg
+                                                """.trimIndent()
+
+                                                val aiMsgId = UUID.randomUUID().toString()
+                                                var accumulatedText = ""
+                                                dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "...", isUser = false))
+                                                suggestedQuestions = emptyList()
+
+                                                gemini?.generateResponseStream(fullPrompt)?.collect { chunk ->
+                                                    accumulatedText += chunk
+                                                    dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = accumulatedText, isUser = false))
+                                                }
+                                                generateSuggestions(dao.getMessagesForSessionSync(sessionId))
+                                            }
+                                        }
+                                    },
+                                    label = { Text(question, fontSize = 13.sp, textAlign = TextAlign.Center) },
+                                    colors = SuggestionChipDefaults.suggestionChipColors(
+                                        containerColor = NotionSafeGreen.copy(alpha = 0.05f),
+                                        labelColor = NotionSafeGreen
+                                    ),
+                                    border = SuggestionChipDefaults.suggestionChipBorder(
+                                        borderColor = NotionSafeGreen.copy(alpha = 0.2f),
+                                        enabled = true
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             } else {
                 LazyColumn(
@@ -4224,11 +4741,89 @@ fun ConsultationScreen(
             
         }
 
+        // サジェストされた質問（チャット進行中のみ表示。空画面時は中央に表示するため）
+        if (suggestedQuestions.isNotEmpty() && !isGenerating && messages.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                suggestedQuestions.forEach { question ->
+                    SuggestionChip(
+                        onClick = {
+                            if (isReady && !isGenerating) {
+                                val userMsg = question
+                                scope.launch {
+                                    val sessionId = currentSessionId ?: UUID.randomUUID().toString()
+                                    dao.insertChatMessage(ChatMessageEntity(sessionId = sessionId, text = userMsg, isUser = true))
+                                    if (currentSessionId == null) {
+                                        dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = userMsg.take(20), lastMessageAt = System.currentTimeMillis()))
+                                        onSessionSelected(sessionId)
+                                    }
+                                    
+                                    // メッセージ送信後の共通処理を共通化したいが、ここではinputText送信と同じロジックを記述
+                                    // 実際には handleSendMessage(userMsg) のような関数を作るのが良い
+                                    
+                                    val assetContext = buildString {
+                                        if (assets.isNotEmpty()) {
+                                            appendLine("【現在の資産状況】")
+                                            assets.forEach { appendLine("- ${it.name}: ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})") }
+                                        }
+                                        val activeLendings = lendings.filter { !it.isRecovered }
+                                        if (activeLendings.isNotEmpty()) {
+                                            appendLine("【貸付状況】")
+                                            activeLendings.forEach { appendLine("- ${it.personName}への貸付: ¥${String.format(Locale.JAPAN, "%,d", it.amount - it.recoveredAmount)}") }
+                                        }
+                                    }
+                                    val recentTxContext = if (transactions.isNotEmpty()) {
+                                        "【直近の支出記録】\n" + transactions.take(10).joinToString("\n") { 
+                                            "- ${SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
+                                        } + "\n\n"
+                                    } else ""
+                                    
+                                    val fullPrompt = """
+                                        あなたは家計管理AIアシスタント「覗き魔AI」です。
+                                        ユーザーの資産状況と支出履歴をもとに、親身かつ少し鋭い視点でアドバイスしてください。
+                                        
+                                        $assetContext
+                                        $recentTxContext
+                                        ユーザーの質問: $userMsg
+                                    """.trimIndent()
+
+                                    val aiMsgId = UUID.randomUUID().toString()
+                                    var accumulatedText = ""
+                                    dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "...", isUser = false))
+                                    suggestedQuestions = emptyList() // 送信時にクリア
+
+                                    gemini?.generateResponseStream(fullPrompt)?.collect { chunk ->
+                                        accumulatedText += chunk
+                                        dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = accumulatedText, isUser = false))
+                                    }
+                                    generateSuggestions(dao.getMessagesForSessionSync(sessionId))
+                                }
+                            }
+                        },
+                        label = { Text(question, fontSize = 12.sp) },
+                        colors = SuggestionChipDefaults.suggestionChipColors(
+                            containerColor = NotionSafeGreen.copy(alpha = 0.05f),
+                            labelColor = NotionSafeGreen
+                        ),
+                        border = SuggestionChipDefaults.suggestionChipBorder(
+                            borderColor = NotionSafeGreen.copy(alpha = 0.2f),
+                            enabled = true
+                        )
+                    )
+                }
+            }
+        }
+
         // 入力フォーム
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .padding(start = 24.dp, end = 24.dp, top = 2.dp, bottom = 0.dp)
                 .imePadding()
         ) {
             Surface(
@@ -4236,11 +4831,11 @@ fun ConsultationScreen(
                     .fillMaxWidth()
                     .shadow(
                         elevation = 24.dp,
-                        shape = RoundedCornerShape(36.dp),
+                        shape = RoundedCornerShape(12.dp),
                         ambientColor = Color(0x22000000),
                         spotColor = Color(0x33000000)
                     ),
-                shape = RoundedCornerShape(36.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = NotionWhite,
                 border = BorderStroke(1.dp, NotionBorder),
                 tonalElevation = 0.dp
@@ -4250,7 +4845,7 @@ fun ConsultationScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(modifier = Modifier.weight(1f)) {
-                            if (inputText.isEmpty()) Text("相談内容を入力...", color = NotionTextSecondary, fontSize = 15.sp)
+                            if (inputText.isEmpty()) Text("相談内容を入力", color = NotionTextSecondary, fontSize = 15.sp)
                             androidx.compose.foundation.text.BasicTextField(
                                 value = inputText,
                                 onValueChange = { inputText = it },
@@ -4274,8 +4869,8 @@ fun ConsultationScreen(
                                             dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = userMsg.take(20), lastMessageAt = System.currentTimeMillis()))
                                             onSessionSelected(sessionId)
                                         } else {
-                                            chatSessions.find { it.id == sessionId }?.let {
-                                                dao.upsertChatSession(it.copy(lastMessageAt = System.currentTimeMillis()))
+                                            chatSessions.find { it.id == sessionId }?.let { session ->
+                                                dao.upsertChatSession(session.copy(lastMessageAt = System.currentTimeMillis()))
                                             }
                                         }
 
@@ -4316,15 +4911,18 @@ fun ConsultationScreen(
                                         val aiMsgId = UUID.randomUUID().toString()
                                         var accumulatedText = ""
                                         dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "...", isUser = false))
+                                        suggestedQuestions = emptyList() // 送信時にクリア
 
                                         gemini.generateResponseStream(fullPrompt).collect { chunk ->
                                             accumulatedText += chunk
                                             dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = accumulatedText, isUser = false))
                                         }
+                                        // 生成完了後にサジェストを生成
+                                        generateSuggestions(dao.getMessagesForSessionSync(sessionId))
                                         
                                         // セッションの最終更新日時を再度更新
-                                        chatSessions.find { it.id == sessionId }?.let {
-                                            dao.upsertChatSession(it.copy(lastMessageAt = System.currentTimeMillis()))
+                                        chatSessions.find { it.id == sessionId }?.let { session ->
+                                            dao.upsertChatSession(session.copy(lastMessageAt = System.currentTimeMillis()))
                                         }
                                     }
                                 }
@@ -4384,15 +4982,14 @@ fun ChatBubble(message: ChatMessage) {
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(Color.White)
-                    .border(1.dp, NotionBorder, CircleShape)
-                    .padding(4.dp),
+                    .background(NotionSafeGreen.copy(alpha = 0.1f)),
                 contentAlignment = Alignment.Center
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.nozokima),
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
                     contentDescription = null,
-                    modifier = Modifier.size(24.dp)
+                    tint = NotionSafeGreen,
+                    modifier = Modifier.size(18.dp)
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
@@ -4541,6 +5138,9 @@ fun GeneralSettingsScreen(
     dao: FinanceDao,
     appLockEnabled: Boolean,
     onToggleAppLock: (Boolean) -> Unit,
+    biometricEnabled: Boolean,
+    onToggleBiometric: (Boolean) -> Unit,
+    isBiometricAvailable: Boolean,
     onChangePassword: () -> Unit,
     onExportClick: () -> Unit,
     onImportClick: () -> Unit,
@@ -4570,14 +5170,7 @@ fun GeneralSettingsScreen(
                 .background(NotionBackground)
                 .verticalScroll(rememberScrollState())
         ) {
-            ScreenHeader(
-                title = "設定",
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
-                    }
-                }
-            )
+            ScreenHeader(title = "設定")
             
             Spacer(modifier = Modifier.height(16.dp))
             
@@ -4629,6 +5222,26 @@ fun GeneralSettingsScreen(
                             description = "現在のロック用パスワードを更新",
                             onClick = onChangePassword
                         )
+                        if (isBiometricAvailable) {
+                            HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                            SettingsItem(
+                                icon = Icons.Default.Fingerprint,
+                                title = "生体認証を使用",
+                                description = "指紋や顔認証でロックを解除する",
+                                trailing = {
+                                    Switch(
+                                        checked = biometricEnabled,
+                                        onCheckedChange = { onToggleBiometric(it) },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = NotionSafeGreen,
+                                            uncheckedThumbColor = Color.White,
+                                            uncheckedTrackColor = NotionBorder
+                                        )
+                                    )
+                                }
+                            )
+                        }
                     }
                 }
 
@@ -4865,6 +5478,7 @@ fun BudgetSettingsScreen(
     val lendings by dao.getAllLendings().collectAsState(initial = emptyList())
     val goalSetting by dao.getGoalSetting().collectAsState(initial = null)
     val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
 
     val defaultDateMillis = remember { Calendar.getInstance().apply { add(Calendar.MONTH, 6) }.timeInMillis }
 
@@ -4949,12 +5563,14 @@ fun BudgetSettingsScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // タイトル行
+        val screenTitle = when {
+            goalAchieved -> "目標達成"
+            showResults -> "目標経過"
+            else -> "目標設定"
+        }
+
         ScreenHeader(
-            title = when {
-                goalAchieved -> "目標達成"
-                showResults -> "目標経過"
-                else -> "目標設定"
-            },
+            title = screenTitle,
             navigationIcon = onBack?.let {
                 {
                     IconButton(onClick = it) {
@@ -4964,7 +5580,7 @@ fun BudgetSettingsScreen(
             }
         )
 
-        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 24.dp)) {
 
         GoalStepper(currentStep = currentStep)
 
@@ -4999,11 +5615,22 @@ fun BudgetSettingsScreen(
                 titleText = titleText,
                 onTitleChange = { titleText = it; saveGoal() },
                 targetAmountText = targetAmountText,
-                onAmountClick = { goalKeypadTarget = "amount"; onKeypadVisibilityChange(true) },
+                onAmountClick = { 
+                    focusManager.clearFocus()
+                    goalKeypadTarget = "amount"
+                    onKeypadVisibilityChange(true)
+                },
                 monthlyIncomeText = monthlyIncomeText,
-                onIncomeClick = { goalKeypadTarget = "income"; onKeypadVisibilityChange(true) },
+                onIncomeClick = { 
+                    focusManager.clearFocus()
+                    goalKeypadTarget = "income"
+                    onKeypadVisibilityChange(true)
+                },
                 targetDateMillis = targetDateMillis,
-                onDateClick = { showDatePicker = true },
+                onDateClick = { 
+                    focusManager.clearFocus()
+                    showDatePicker = true
+                },
                 dateFormatter = dateFormatter,
                 canStart = canStart,
                 actualTotalAssets = actualTotalAssets,
@@ -5026,6 +5653,8 @@ fun BudgetSettingsScreen(
                 startDateMillis = startDateMillis,
                 targetDateMillis = targetDateMillis,
                 remainingDays = remainingDays,
+                totalSpendable = totalSpendable,
+                monthlyBudget = monthlyBudget,
                 aiIsReady = aiIsReady,
                 aiIsGenerating = aiIsGenerating,
                 showAiProgress = showAiProgress,
@@ -5142,11 +5771,7 @@ fun GoalAchievedView(
     onRefreshAi: () -> Unit,
     onResetGoal: () -> Unit
 ) {
-    val totalGoalDays = ((targetDateMillis - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(1L)
-    val passedDays = ((System.currentTimeMillis() - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
-    val daysSaved = totalGoalDays - passedDays
-
-    // 1: お祝いカード
+    // お祝いカード
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -5164,60 +5789,9 @@ fun GoalAchievedView(
         }
     }
 
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(32.dp))
 
-    // 2: 実績サマリー
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.White, RoundedCornerShape(16.dp))
-            .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
-            .padding(18.dp)
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            // 上段
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                    Text("目標達成", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("Complete!", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-                LinearProgressIndicator(
-                    progress = { 1f },
-                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                    color = Color(0xFF2196F3),
-                    trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
-                    strokeCap = StrokeCap.Round
-                )
-            }
-
-            HorizontalDivider(thickness = 0.5.dp, color = NotionBorder)
-
-            // 下段
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                    Text("実績期間", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    val progress = if (totalGoalDays > 0) (passedDays * 100 / totalGoalDays).toInt() else 100
-                    Text("$progress%", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-                LinearProgressIndicator(
-                    progress = { if (totalGoalDays > 0) (passedDays.toFloat() / totalGoalDays.toFloat()).coerceIn(0f, 1f) else 1f },
-                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                    color = Color(0xFF2196F3),
-                    trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
-                    strokeCap = StrokeCap.Round
-                )
-                if (daysSaved > 0) {
-                    Text("予定より $daysSaved 日早くゴールしました！", color = NotionSafeGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                } else {
-                    Text("目標の期限通りに達成しました！", color = NotionTextSecondary, fontSize = 12.sp)
-                }
-            }
-        }
-    }
-
-    Spacer(Modifier.height(12.dp))
-
-    // 3: AIフィードバック
+    // 覗き魔 AI アドバイス
     AiAdvisorCard(
         aiIsReady = aiIsReady,
         aiIsGenerating = aiIsGenerating,
@@ -5228,9 +5802,9 @@ fun GoalAchievedView(
         defaultText = "目標達成おめでとうございます！これからもあなたの資産を覗き続けますよ。"
     )
 
-    Spacer(Modifier.height(24.dp))
+    Spacer(Modifier.height(32.dp))
 
-    // 4: 次の目標へボタン
+    // 次の目標へボタン
     Button(
         onClick = onResetGoal,
         modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -5260,6 +5834,7 @@ fun GoalSetupView(
     monthlyBudget: Long,
     onStart: () -> Unit
 ) {
+    val focusManager = LocalFocusManager.current
     SectionLabel("目標の定義")
     Spacer(Modifier.height(12.dp))
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -5287,7 +5862,8 @@ fun GoalSetupView(
                             if (titleText.isEmpty()) Text("旅行のための貯金", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
                             inner()
                         },
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done)
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focusManager.clearFocus() })
                     )
                 }
             }
@@ -5441,6 +6017,8 @@ fun GoalProgressView(
     startDateMillis: Long,
     targetDateMillis: Long,
     remainingDays: Int,
+    totalSpendable: Long,
+    monthlyBudget: Long,
     aiIsReady: Boolean,
     aiIsGenerating: Boolean,
     showAiProgress: Boolean,
@@ -5456,95 +6034,156 @@ fun GoalProgressView(
     val passedDays = ((System.currentTimeMillis() - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
     val timeProgressRatio = (passedDays.toFloat() / totalGoalDays.toFloat()).coerceIn(0f, 1f)
 
-    // 1: 目標と現在の資産
+    // 1枚の大きなカードにまとめる
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFFE3F2FD).copy(alpha = 0.5f), RoundedCornerShape(16.dp))
-            .border(1.dp, Color(0xFF2196F3).copy(alpha = 0.2f), RoundedCornerShape(16.dp))
-            .padding(horizontal = 24.dp, vertical = 20.dp)
+            .padding(top = 8.dp)
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-            Text("Current Progress🏃", color = Color(0xFF1976D2), fontSize = 16.sp, fontWeight = FontWeight.Black)
-            Spacer(Modifier.height(6.dp))
-            val statusTitle = if (titleText.isNotEmpty()) "「${titleText}」に向かって貯金中" else "目標に向かって貯金中"
-            Text(statusTitle, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(12.dp))
-            Text("¥ ${String.format(Locale.JAPAN, "%,d", actualTotalAssets)}", color = Color(0xFF1976D2), fontSize = 32.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
-        }
-    }
-
-    Spacer(Modifier.height(12.dp))
-
-    // 2: 実績サマリー
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.White, RoundedCornerShape(16.dp))
-            .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
-            .padding(18.dp)
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            // 上段: 目標達成率
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                    Text("目標達成", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("$progressPercent%", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Column {
+            val statusTitle = if (titleText.isNotEmpty()) titleText else "貯金"
+            SectionLabel("$statusTitle の進捗")
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // 現在の進捗ヘッダー
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column {
+                    Text(
+                        text = buildAnnotatedString {
+                            withStyle(SpanStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold)) {
+                                append("¥ ${String.format(Locale.JAPAN, "%,d", actualTotalAssets)}")
+                            }
+                            withStyle(SpanStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium, color = NotionTextSecondary)) {
+                                append(" / ¥ ${String.format(Locale.JAPAN, "%,d", targetAmount)}")
+                            }
+                        },
+                        color = Color(0xFF2196F3),
+                        letterSpacing = (-1).sp
+                    )
                 }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 目標達成プログレス
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Text("目標達成", color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        text = "$progressPercent%",
+                        color = NotionTextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
                 LinearProgressIndicator(
                     progress = { progressRatio },
-                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)),
                     color = Color(0xFF2196F3),
-                    trackColor = Color(0xFF2196F3).copy(alpha = 0.12f),
+                    trackColor = NotionBorder,
                     strokeCap = StrokeCap.Round
                 )
             }
 
-            HorizontalDivider(thickness = 0.5.dp, color = NotionBorder)
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // 下段: 期間経過率
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                    Text("期間経過", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("${(timeProgressRatio * 100).toInt()}%", color = NotionSafeGreen, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            // 期間経過プログレス
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Text("期限", color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Text("あと $remainingDays 日", color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
+                Spacer(modifier = Modifier.height(8.dp))
                 LinearProgressIndicator(
                     progress = { timeProgressRatio },
-                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)),
                     color = NotionSafeGreen,
-                    trackColor = NotionSafeGreen.copy(alpha = 0.12f),
+                    trackColor = NotionBorder,
                     strokeCap = StrokeCap.Round
                 )
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("残り $remainingDays 日", color = NotionTextSecondary, fontSize = 12.sp)
-                    Text("目標 ¥ ${String.format(Locale.JAPAN, "%,d", targetAmount)}", color = NotionTextSecondary, fontSize = 12.sp)
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 覗き魔 AI アドバイス (カード内に配置)
+            AiAdvisorCard(
+                aiIsReady = aiIsReady,
+                aiIsGenerating = aiIsGenerating,
+                showAiProgress = showAiProgress,
+                aiStatusLabel = aiStatusLabel,
+                goalAiText = goalAiText,
+                onRefreshAi = onRefreshAi
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            SectionLabel("現在のシミュレーション")
+            Spacer(modifier = Modifier.height(12.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, NotionBorder)
+                ) {
+                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = Color(0xFF2196F3).copy(alpha = 0.08f)) {
+                            Icon(Icons.Default.Wallet, null, tint = Color(0xFF2196F3), modifier = Modifier.padding(10.dp))
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("合計の許容支出", fontSize = 12.sp, color = NotionTextSecondary)
+                            Text("¥ ${String.format(Locale.JAPAN, "%,d", totalSpendable)}", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, NotionBorder)
+                ) {
+                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = Color(0xFF2196F3).copy(alpha = 0.08f)) {
+                            Icon(Icons.Default.CalendarMonth, null, tint = Color(0xFF2196F3), modifier = Modifier.padding(10.dp))
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("月の予算", fontSize = 12.sp, color = NotionTextSecondary)
+                            Text("¥ ${String.format(Locale.JAPAN, "%,d", monthlyBudget)}", color = Color(0xFF2196F3), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
     }
 
-    Spacer(Modifier.height(12.dp))
-
-    // 覗き魔 AI カード
-    AiAdvisorCard(
-        aiIsReady = aiIsReady,
-        aiIsGenerating = aiIsGenerating,
-        showAiProgress = showAiProgress,
-        aiStatusLabel = aiStatusLabel,
-        goalAiText = goalAiText,
-        onRefreshAi = onRefreshAi
-    )
-
     Spacer(Modifier.height(24.dp))
-    OutlinedButton(
-        onClick = onEditClick,
-        modifier = Modifier.fillMaxWidth().height(48.dp),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, NotionBorder)
-    ) {
-        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp), tint = NotionTextSecondary)
-        Spacer(modifier = Modifier.width(8.dp))
-        Text("設定を変更", fontSize = 14.sp, color = NotionTextSecondary)
+    
+    // 設定変更ボタン（より控えめに）
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+        TextButton(
+            onClick = onEditClick,
+            colors = ButtonDefaults.textButtonColors(contentColor = NotionTextSecondary)
+        ) {
+            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("設定を変更する", fontSize = 13.sp)
+        }
     }
 }
 
@@ -5561,10 +6200,9 @@ fun AiAdvisorCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 128.dp)
-            .background(Color.White, RoundedCornerShape(16.dp))
-            .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
-            .padding(18.dp)
+            .heightIn(min = 160.dp) // 最初から高さを確保してレイアウトの跳ねを防止
+            .background(Color(0xFFF5F5F5), RoundedCornerShape(10.dp))
+            .padding(12.dp)
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -5597,26 +6235,15 @@ fun AiAdvisorCard(
             if (aiStatusLabel != null) {
                 Text(aiStatusLabel, color = NotionTextSecondary.copy(alpha = 0.6f), fontSize = 12.sp)
             } else if (goalAiText.isNotEmpty()) {
-                Text(goalAiText, color = NotionTextPrimary, fontSize = 14.sp, lineHeight = 22.sp)
+                Text(goalAiText, color = NotionTextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
             } else if (defaultText != null) {
-                Text(defaultText, color = NotionTextPrimary, fontSize = 14.sp, lineHeight = 22.sp)
+                Text(defaultText, color = NotionTextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }
     }
 }
 
 // --- ヘルパー Composable ---
-
-@Composable
-private fun SettingSummaryChip(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.background(color.copy(alpha = 0.08f), RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(label, color = NotionTextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        Text(value, color = NotionTextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 1)
-    }
-}
 
 @Composable
 private fun GoalStepper(currentStep: Int) {
@@ -5660,46 +6287,6 @@ private fun GoalStepper(currentStep: Int) {
 @Composable
 private fun SectionLabel(text: String) {
     Text(text, color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
-}
-
-@Composable
-private fun GoalInputCard(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).border(1.dp, NotionBorder, RoundedCornerShape(16.dp)),
-        content = content
-    )
-}
-
-@Composable
-private fun AiStatCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    value: String,
-    subLabel: String? = null,
-    modifier: Modifier = Modifier
-) {
-    Box(modifier = modifier.background(Color.White, RoundedCornerShape(12.dp)).border(1.dp, NotionBorder, RoundedCornerShape(12.dp)).padding(16.dp)) {
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, null, tint = NotionSafeGreen, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(label, color = NotionTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(value, color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Black)
-            if (subLabel != null) Text(subLabel, color = NotionTextSecondary, fontSize = 10.sp)
-        }
-    }
-}
-
-
-
-@Composable
-fun SummaryItemMini(label: String, amount: Int, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = NotionTextSecondary, fontSize = 11.sp)
-        Text("¥ ${String.format(Locale.JAPAN, "%,d", amount)}", color = color, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-    }
 }
 
 @Composable
@@ -5831,6 +6418,11 @@ fun DeleteConfirmDialog(text: String, onDismiss: () -> Unit, onConfirm: () -> Un
 fun ScreenHeader(
     title: String,
     navigationIcon: @Composable (() -> Unit)? = null,
+    titleStyle: androidx.compose.ui.text.TextStyle = androidx.compose.ui.text.TextStyle(
+        fontSize = 24.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = (-0.5).sp
+    ),
     trailingContent: @Composable (() -> Unit)? = null
 ) {
     Row(
@@ -5848,9 +6440,7 @@ fun ScreenHeader(
         Text(
             text = title,
             color = NotionTextPrimary,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = (-0.5).sp,
+            style = titleStyle,
             modifier = Modifier.weight(1f)
         )
         if (trailingContent != null) trailingContent()

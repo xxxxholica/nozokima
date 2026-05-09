@@ -57,7 +57,7 @@ android {
 
     packaging {
         jniLibs {
-            useLegacyPackaging = true
+            useLegacyPackaging = false
         }
     }
     // assetsに巨大ファイルを置かないため、noCompressの設定は不要になりました
@@ -82,9 +82,13 @@ dependencies {
     implementation("net.objecthunter:exp4j:0.4.8")
 
     // ML Kit Text Recognition
-    implementation("com.google.mlkit:text-recognition:16.0.0")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
     // ML Kit GenAI Prompt API (Gemini Nano)
     implementation("com.google.mlkit:genai-prompt:1.0.0-beta2")
+
+    // Biometric
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.9")
 }

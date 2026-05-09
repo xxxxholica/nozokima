@@ -90,6 +90,9 @@ interface FinanceDao {
     @Query("DELETE FROM chat_messages WHERE sessionId = :sessionId")
     suspend fun deleteMessagesForSession(sessionId: String)
 
+    @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
+    suspend fun getMessagesForSessionSync(sessionId: String): List<ChatMessageEntity>
+
     @Query("SELECT * FROM transactions")
     suspend fun getAllTransactionsList(): List<TransactionEntity>
 
