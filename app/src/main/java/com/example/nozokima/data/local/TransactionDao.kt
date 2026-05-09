@@ -1,8 +1,9 @@
-package com.example.nozokima
+package com.example.nozokima.data.local
 
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import com.example.nozokima.data.local.entities.TransactionEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao

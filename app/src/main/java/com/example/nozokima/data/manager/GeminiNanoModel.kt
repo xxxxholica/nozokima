@@ -1,4 +1,4 @@
-package com.example.nozokima
+package com.example.nozokima.data.manager
 
 import android.content.Context
 import android.util.Log

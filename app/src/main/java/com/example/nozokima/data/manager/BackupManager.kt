@@ -1,5 +1,7 @@
-package com.example.nozokima
+package com.example.nozokima.data.manager
 
+import com.example.nozokima.data.local.FinanceDao
+import com.example.nozokima.data.local.entities.*
 import org.json.JSONArray
 import org.json.JSONObject
 

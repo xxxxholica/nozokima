@@ -1,4 +1,4 @@
-package com.example.nozokima
+package com.example.nozokima.data.manager
 
 import android.util.Base64
 import java.security.SecureRandom
