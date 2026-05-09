@@ -1989,6 +1989,7 @@ fun HomeScreen(
                     // 覗き魔 AI によるホーム分析
                     Spacer(modifier = Modifier.height(20.dp))
 
+                    val aiStatus by (gemini?.status ?: kotlinx.coroutines.flow.MutableStateFlow(FeatureStatus.UNAVAILABLE)).collectAsState()
                     val aiIsReady by (gemini?.isReady ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsState()
                     val aiIsGenerating by (gemini?.isGenerating ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsState()
                     val aiIsChecking by (gemini?.isCheckingStatus ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsState()
@@ -2016,23 +2017,25 @@ fun HomeScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
+                                val isUnavailable = aiStatus == FeatureStatus.UNAVAILABLE
+                                val themeColor = if (isUnavailable) Color(0xFFE57373) else NotionSafeGreen
                                 Box(
                                     modifier = Modifier
                                         .size(28.dp)
-                                        .background(NotionSafeGreen.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
+                                        .background(themeColor.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.AutoAwesome,
+                                        imageVector = if (isUnavailable) Icons.Default.Info else Icons.Default.AutoAwesome,
                                         contentDescription = "AI",
-                                        tint = NotionSafeGreen,
+                                        tint = themeColor,
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "覗き魔 AI",
-                                    color = NotionSafeGreen,
+                                    text = if (isUnavailable) "覗き魔AI は利用できません" else "覗き魔 AI",
+                                    color = themeColor,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -2046,7 +2049,7 @@ fun HomeScreen(
                                         Icon(
                                             imageVector = Icons.Default.Refresh,
                                             contentDescription = "再生成",
-                                            tint = NotionSafeGreen,
+                                            tint = themeColor,
                                             modifier = Modifier.size(14.dp)
                                         )
                                     }
@@ -2069,6 +2072,24 @@ fun HomeScreen(
                                     color = NotionTextSecondary.copy(alpha = 0.6f),
                                     fontSize = 12.sp
                                 )
+                            } else if (aiStatus == FeatureStatus.UNAVAILABLE) {
+                                val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = "Gemini Nanoに対応したデバイスのみ利用可能です。\n対応デバイスは下記リンクをご覧ください。",
+                                        color = NotionTextPrimary,
+                                        fontSize = 12.sp,
+                                        lineHeight = 18.sp
+                                    )
+                                    Text(
+                                        text = "https://developers.google.com/ml-kit/genai?hl=ja",
+                                        color = Color(0xFF1976D2),
+                                        fontSize = 12.sp,
+                                        modifier = Modifier.clickable { 
+                                            uriHandler.openUri("https://developers.google.com/ml-kit/genai?hl=ja")
+                                        }
+                                    )
+                                }
                             } else if (homeAiText.isNotEmpty()) {
                                 Text(
                                     text = homeAiText,
@@ -4385,6 +4406,8 @@ fun ConsultationScreen(
     val progress by (gemini?.downloadProgress?.collectAsState() ?: remember { mutableIntStateOf(0) })
     val errorMsg by (gemini?.errorMessage?.collectAsState() ?: remember { mutableStateOf<String?>(null) })
     val isGenerating by (gemini?.isGenerating?.collectAsState() ?: remember { mutableStateOf(false) })
+    val aiStatus by (gemini?.status?.collectAsState() ?: remember { mutableStateOf(FeatureStatus.UNAVAILABLE) })
+    val isAvailable = aiStatus != FeatureStatus.UNAVAILABLE
 
     // --- サジェスト生成ロジック ---
     fun generateSuggestions(currentMessages: List<ChatMessageEntity>) {
@@ -4615,7 +4638,8 @@ fun ConsultationScreen(
             )
         }
 
-        if (!isReady) {
+        val showStatusBox = !isReady && (errorMsg != null || isDownloading || aiStatus == FeatureStatus.UNAVAILABLE)
+        if (showStatusBox) {
             Surface(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 color = NotionBackground,
@@ -4623,7 +4647,37 @@ fun ConsultationScreen(
                 border = BorderStroke(1.dp, NotionBorder)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    if (errorMsg != null) {
+                    if (aiStatus == FeatureStatus.UNAVAILABLE) {
+                        val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .background(Color(0xFFE57373).copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Info, null, tint = Color(0xFFE57373), modifier = Modifier.size(16.dp))
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text("覗き魔AI は利用できません", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE57373))
+                            }
+                            Text(
+                                text = "Gemini Nanoに対応したデバイスのみ利用可能です。\n対応デバイスは下記リンクをご覧ください。",
+                                fontSize = 12.sp,
+                                color = NotionTextPrimary,
+                                lineHeight = 18.sp
+                            )
+                            Text(
+                                text = "https://developers.google.com/ml-kit/genai?hl=ja",
+                                color = Color(0xFF1976D2),
+                                fontSize = 12.sp,
+                                modifier = Modifier.clickable { 
+                                    uriHandler.openUri("https://developers.google.com/ml-kit/genai?hl=ja")
+                                }
+                            )
+                        }
+                    } else if (errorMsg != null) {
                         Text(errorMsg ?: "", fontSize = 12.sp, color = Color(0xFFE57373))
                     } else if (isDownloading) {
                         Text("AIモデルを準備中... $progress%", fontSize = 12.sp, color = NotionTextSecondary)
@@ -4657,12 +4711,13 @@ fun ConsultationScreen(
                     if (suggestedQuestions.isNotEmpty()) {
                         Spacer(Modifier.height(20.dp))
                         Column(
-                            modifier = Modifier.padding(horizontal = 24.dp),
+                            modifier = Modifier.padding(horizontal = 24.dp).alpha(if (isAvailable) 1f else 0.5f),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             suggestedQuestions.forEach { question ->
                                 SuggestionChip(
+                                    enabled = isReady,
                                     onClick = {
                                         if (isReady && !isGenerating) {
                                             val userMsg = question
@@ -4747,11 +4802,13 @@ fun ConsultationScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 2.dp),
+                    .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 2.dp)
+                    .alpha(if (isAvailable) 1f else 0.5f),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 suggestedQuestions.forEach { question ->
                     SuggestionChip(
+                        enabled = isReady,
                         onClick = {
                             if (isReady && !isGenerating) {
                                 val userMsg = question
@@ -4825,6 +4882,7 @@ fun ConsultationScreen(
                 .fillMaxWidth()
                 .padding(start = 24.dp, end = 24.dp, top = 2.dp, bottom = 0.dp)
                 .imePadding()
+                .alpha(if (isAvailable) 1f else 0.5f)
         ) {
             Surface(
                 modifier = Modifier
@@ -4850,6 +4908,7 @@ fun ConsultationScreen(
                                 value = inputText,
                                 onValueChange = { inputText = it },
                                 modifier = Modifier.fillMaxWidth(),
+                                enabled = isReady,
                                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, color = NotionTextPrimary),
                                 maxLines = 5
                             )
@@ -5493,6 +5552,7 @@ fun BudgetSettingsScreen(
     var showResults by rememberSaveable { mutableStateOf(false) }
     var goalKeypadTarget by remember { mutableStateOf("amount") } // "amount" or "income"
 
+    val aiStatus by (gemini?.status ?: kotlinx.coroutines.flow.MutableStateFlow(FeatureStatus.UNAVAILABLE)).collectAsState()
     val aiIsReady by (gemini?.isReady ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsState()
     val aiIsGenerating by (gemini?.isGenerating ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsState()
     val aiIsChecking by (gemini?.isCheckingStatus ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsState()
@@ -5593,6 +5653,7 @@ fun BudgetSettingsScreen(
                 targetAmount = targetAmount,
                 startDateMillis = startDateMillis,
                 targetDateMillis = targetDateMillis,
+                aiStatus = aiStatus,
                 aiIsReady = aiIsReady,
                 aiIsGenerating = aiIsGenerating,
                 showAiProgress = showAiProgress,
@@ -5655,6 +5716,7 @@ fun BudgetSettingsScreen(
                 remainingDays = remainingDays,
                 totalSpendable = totalSpendable,
                 monthlyBudget = monthlyBudget,
+                aiStatus = aiStatus,
                 aiIsReady = aiIsReady,
                 aiIsGenerating = aiIsGenerating,
                 showAiProgress = showAiProgress,
@@ -5763,6 +5825,7 @@ fun GoalAchievedView(
     targetAmount: Long,
     startDateMillis: Long,
     targetDateMillis: Long,
+    aiStatus: Int,
     aiIsReady: Boolean,
     aiIsGenerating: Boolean,
     showAiProgress: Boolean,
@@ -5793,6 +5856,7 @@ fun GoalAchievedView(
 
     // 覗き魔 AI アドバイス
     AiAdvisorCard(
+        aiStatus = aiStatus,
         aiIsReady = aiIsReady,
         aiIsGenerating = aiIsGenerating,
         showAiProgress = showAiProgress,
@@ -6019,6 +6083,7 @@ fun GoalProgressView(
     remainingDays: Int,
     totalSpendable: Long,
     monthlyBudget: Long,
+    aiStatus: Int,
     aiIsReady: Boolean,
     aiIsGenerating: Boolean,
     showAiProgress: Boolean,
@@ -6120,6 +6185,7 @@ fun GoalProgressView(
 
             // 覗き魔 AI アドバイス (カード内に配置)
             AiAdvisorCard(
+                aiStatus = aiStatus,
                 aiIsReady = aiIsReady,
                 aiIsGenerating = aiIsGenerating,
                 showAiProgress = showAiProgress,
@@ -6189,6 +6255,7 @@ fun GoalProgressView(
 
 @Composable
 fun AiAdvisorCard(
+    aiStatus: Int = FeatureStatus.UNAVAILABLE,
     aiIsReady: Boolean,
     aiIsGenerating: Boolean,
     showAiProgress: Boolean,
@@ -6206,20 +6273,32 @@ fun AiAdvisorCard(
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                val isUnavailable = aiStatus == FeatureStatus.UNAVAILABLE
+                val themeColor = if (isUnavailable) Color(0xFFE57373) else NotionSafeGreen
                 Box(
                     modifier = Modifier
                         .size(28.dp)
-                        .background(NotionSafeGreen.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
+                        .background(themeColor.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.AutoAwesome, "AI", tint = NotionSafeGreen, modifier = Modifier.size(16.dp))
+                    Icon(
+                        imageVector = if (isUnavailable) Icons.Default.Info else Icons.Default.AutoAwesome,
+                        contentDescription = "AI",
+                        tint = themeColor,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
                 Spacer(Modifier.width(8.dp))
-                Text("覗き魔 AI", color = NotionSafeGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = if (isUnavailable) "覗き魔AI は利用できません" else "覗き魔 AI",
+                    color = themeColor,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
                 Spacer(Modifier.weight(1f))
                 if (aiIsReady && !aiIsGenerating) {
                     IconButton(onClick = onRefreshAi, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Refresh, "再生成", tint = NotionSafeGreen, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Refresh, "再生成", tint = themeColor, modifier = Modifier.size(14.dp))
                     }
                 }
             }
@@ -6234,6 +6313,24 @@ fun AiAdvisorCard(
             }
             if (aiStatusLabel != null) {
                 Text(aiStatusLabel, color = NotionTextSecondary.copy(alpha = 0.6f), fontSize = 12.sp)
+            } else if (aiStatus == FeatureStatus.UNAVAILABLE) {
+                val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Gemini Nanoに対応したデバイスのみ利用可能です。\n対応デバイスは下記リンクをご覧ください。",
+                        color = NotionTextPrimary,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp
+                    )
+                    Text(
+                        text = "https://developers.google.com/ml-kit/genai?hl=ja",
+                        color = Color(0xFF1976D2),
+                        fontSize = 12.sp,
+                        modifier = Modifier.clickable { 
+                            uriHandler.openUri("https://developers.google.com/ml-kit/genai?hl=ja")
+                        }
+                    )
+                }
             } else if (goalAiText.isNotEmpty()) {
                 Text(goalAiText, color = NotionTextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
             } else if (defaultText != null) {
