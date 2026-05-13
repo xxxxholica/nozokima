@@ -91,4 +91,8 @@ dependencies {
     // Biometric
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.fragment:fragment-ktx:1.8.9")
+
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+
+    implementation("net.lingala.zip4j:zip4j:2.11.5")
 }

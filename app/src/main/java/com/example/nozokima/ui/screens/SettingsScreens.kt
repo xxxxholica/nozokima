@@ -49,7 +49,6 @@ import java.util.*
 
 @Composable
 fun GeneralSettingsScreen(
-    dao: FinanceDao,
     appLockEnabled: Boolean,
     onToggleAppLock: (Boolean) -> Unit,
     biometricEnabled: Boolean,
@@ -62,129 +61,106 @@ fun GeneralSettingsScreen(
     onRecurringManagementClick: () -> Unit,
     onBack: () -> Unit
 ) {
-    var showBackupHistory by remember { mutableStateOf(false) }
-
-    BackHandler {
-        if (showBackupHistory) {
-            showBackupHistory = false
-        } else {
-            onBack()
-        }
-    }
-
-    if (showBackupHistory) {
-        BackupHistoryScreen(
-            dao = dao,
-            onBack = { showBackupHistory = false }
-        )
-    } else {
+    BackHandler { onBack() }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(NotionBackground)
+            .verticalScroll(rememberScrollState())
+    ) {
+        ScreenHeader(title = "設定")
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(NotionBackground)
-                .verticalScroll(rememberScrollState())
+            modifier = Modifier.padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            ScreenHeader(title = "設定")
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            Column(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
-            ) {
-                // カスタマイズセクション
-                SettingsSection(title = "カスタマイズ") {
-                    SettingsItem(
-                        icon = Icons.Default.Category,
-                        title = "カテゴリ管理",
-                        description = "収支カテゴリの追加・編集・並べ替え",
-                        onClick = onCategoryManagementClick
-                    )
+            // カスタマイズセクション
+            SettingsSection(title = "カスタマイズ") {
+                SettingsItem(
+                    icon = Icons.Default.Category,
+                    title = "カテゴリ管理",
+                    description = "収支カテゴリの追加・編集・並べ替え",
+                    onClick = onCategoryManagementClick
+                )
+                HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsItem(
+                    icon = Icons.Default.Autorenew,
+                    title = "固定費設定",
+                    description = "毎月の自動入力を設定・管理",
+                    onClick = onRecurringManagementClick
+                )
+            }
+
+            // セキュリティセクション
+            SettingsSection(title = "セキュリティ") {
+                SettingsItem(
+                    icon = Icons.Default.Lock,
+                    title = "アプリロック",
+                    description = "起動時にパスワード入力を求める",
+                    trailing = {
+                        Switch(
+                            checked = appLockEnabled,
+                            onCheckedChange = { onToggleAppLock(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = NotionSafeGreen,
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = NotionBorder
+                            )
+                        )
+                    }
+                )
+                if (appLockEnabled) {
                     HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
                     SettingsItem(
-                        icon = Icons.Default.Autorenew,
-                        title = "固定費設定",
-                        description = "毎月の自動入力を設定・管理",
-                        onClick = onRecurringManagementClick
+                        icon = Icons.Default.Password,
+                        title = "パスワードの変更",
+                        description = "現在のロック用パスワードを更新",
+                        onClick = onChangePassword
                     )
-                }
-
-                // セキュリティセクション
-                SettingsSection(title = "セキュリティ") {
-                    SettingsItem(
-                        icon = Icons.Default.Lock,
-                        title = "アプリロック",
-                        description = "起動時にパスワード入力を求める",
-                        trailing = {
-                            Switch(
-                                checked = appLockEnabled,
-                                onCheckedChange = { onToggleAppLock(it) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = NotionSafeGreen,
-                                    uncheckedThumbColor = Color.White,
-                                    uncheckedTrackColor = NotionBorder
-                                )
-                            )
-                        }
-                    )
-                    if (appLockEnabled) {
+                    if (isBiometricAvailable) {
                         HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
                         SettingsItem(
-                            icon = Icons.Default.Password,
-                            title = "パスワードの変更",
-                            description = "現在のロック用パスワードを更新",
-                            onClick = onChangePassword
-                        )
-                        if (isBiometricAvailable) {
-                            HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
-                            SettingsItem(
-                                icon = Icons.Default.Fingerprint,
-                                title = "生体認証を使用",
-                                description = "指紋や顔認証でロックを解除する",
-                                trailing = {
-                                    Switch(
-                                        checked = biometricEnabled,
-                                        onCheckedChange = { onToggleBiometric(it) },
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = Color.White,
-                                            checkedTrackColor = NotionSafeGreen,
-                                            uncheckedThumbColor = Color.White,
-                                            uncheckedTrackColor = NotionBorder
-                                        )
+                            icon = Icons.Default.Fingerprint,
+                            title = "生体認証を使用",
+                            description = "指紋や顔認証でロックを解除する",
+                            trailing = {
+                                Switch(
+                                    checked = biometricEnabled,
+                                    onCheckedChange = { onToggleBiometric(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = NotionSafeGreen,
+                                        uncheckedThumbColor = Color.White,
+                                        uncheckedTrackColor = NotionBorder
                                     )
-                                }
-                            )
-                        }
+                                )
+                            }
+                        )
                     }
                 }
-
-                // データ管理セクション
-                SettingsSection(title = "データ管理") {
-                    SettingsItem(
-                        icon = Icons.Default.Upload,
-                        title = "データのエクスポート",
-                        description = "現在のデータを暗号化してファイルに保存",
-                        onClick = onExportClick
-                    )
-                    HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
-                    SettingsItem(
-                        icon = Icons.Default.Download,
-                        title = "データのインポート",
-                        description = "バックアップファイルからデータを復旧",
-                        onClick = onImportClick
-                    )
-                    HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
-                    SettingsItem(
-                        icon = Icons.Default.History,
-                        title = "エクスポート履歴",
-                        description = "過去のバックアップ用パスワードを確認",
-                        onClick = { showBackupHistory = true }
-                    )
-                }
-                
-                Spacer(modifier = Modifier.height(100.dp))
             }
+
+            // データ管理セクション
+            SettingsSection(title = "データ管理") {
+                SettingsItem(
+                    icon = Icons.Default.Upload,
+                    title = "データのエクスポート",
+                    description = "現在のデータを暗号化してファイルに保存",
+                    onClick = onExportClick
+                )
+                HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsItem(
+                    icon = Icons.Default.Download,
+                    title = "データのインポート",
+                    description = "バックアップファイルからデータを復旧",
+                    onClick = onImportClick
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(100.dp))
         }
     }
 }
@@ -238,150 +214,13 @@ fun SettingsItem(
     )
 }
 
-@Composable
-fun BackupHistoryScreen(
-    dao: FinanceDao,
-    onBack: () -> Unit
-) {
-    val history by dao.getAllBackupHistory().collectAsState(initial = emptyList())
-    val scope = rememberCoroutineScope()
-    var historyToDelete by remember { mutableStateOf<BackupHistoryEntity?>(null) }
-
-    if (historyToDelete != null) {
-        DeleteConfirmDialog(
-            text = "このバックアップ履歴を削除しますか？\n（ファイル自体は削除されません）",
-            onDismiss = { historyToDelete = null },
-            onConfirm = {
-                scope.launch {
-                    historyToDelete?.let { dao.deleteBackupHistory(it) }
-                    historyToDelete = null
-                }
-            }
-        )
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(NotionBackground)
-    ) {
-        ScreenHeader(
-            title = "エクスポート履歴",
-            navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
-                }
-            }
-        )
-
-        if (history.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("履歴はありません", color = NotionTextSecondary)
-            }
-        } else {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
-                        .background(Color.White, RoundedCornerShape(12.dp))
-                ) {
-                    Column {
-                        history.forEachIndexed { index, item ->
-                            val haptic = LocalHapticFeedback.current
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .combinedClickable(
-                                        onClick = { },
-                                        onLongClick = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            historyToDelete = item
-                                        }
-                                    )
-                                    .padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .background(NotionSafeGreen.copy(alpha = 0.1f), CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Lock,
-                                        contentDescription = null,
-                                        tint = NotionSafeGreen,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                                
-                                Spacer(modifier = Modifier.width(16.dp))
-                                
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = item.fileName,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = NotionTextPrimary,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f).padding(horizontal = 10.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = SimpleDateFormat("MM/dd HH:mm", Locale.JAPAN).format(Date(item.date)),
-                                            fontSize = 11.sp,
-                                            color = NotionTextSecondary
-                                        )
-                                    }
-                                    
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(NotionBackground, RoundedCornerShape(6.dp))
-                                    ) {
-                                        Text(
-                                            text = item.password,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = NotionTextPrimary,
-                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                            letterSpacing = 0.5.sp,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                        )
-                                    }
-                                }
-                            }
-                            if (index < history.lastIndex) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                    thickness = 0.5.dp,
-                                    color = NotionBorder
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryManagementScreen(
     dao: FinanceDao,
     onBack: () -> Unit
 ) {
+    BackHandler { onBack() }
     val categories by dao.getAllCategories().collectAsState(initial = emptyList())
     var showAddDialog by remember { mutableStateOf(false) }
     var editCategory by remember { mutableStateOf<CategoryEntity?>(null) }
@@ -509,6 +348,7 @@ fun RecurringTransactionManagementScreen(
     dao: FinanceDao,
     onBack: () -> Unit
 ) {
+    BackHandler { onBack() }
     val recurringList by dao.getAllRecurringTransactions().collectAsState(initial = emptyList())
     val assets by dao.getAllAssets().collectAsState(initial = emptyList())
     val categories by dao.getAllCategories().collectAsState(initial = emptyList())

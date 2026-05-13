@@ -29,13 +29,12 @@ fun FloatingNavBar(
     onTabSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val items = listOf("ホーム", "記録", "資産状況", "AI相談", "目標", "設定")
+    val items = listOf("ホーム", "記録", "資産状況", "AI相談", "設定")
     val selectedIcons = listOf(
         Icons.Filled.Home,
         Icons.Filled.AddCircle,
         Icons.Filled.BarChart,
         Icons.AutoMirrored.Filled.Chat,
-        Icons.Filled.TrackChanges,
         Icons.Filled.Settings
     )
     val unselectedIcons = listOf(
@@ -43,7 +42,6 @@ fun FloatingNavBar(
         Icons.Outlined.AddCircle,
         Icons.Outlined.BarChart,
         Icons.AutoMirrored.Outlined.Chat,
-        Icons.Outlined.TrackChanges,
         Icons.Outlined.Settings
     )
 
@@ -81,8 +79,8 @@ fun FloatingNavBar(
             items.forEachIndexed { index, label ->
                 val isSelected = selectedTab == index
                 
-                // 目標(index 4)と設定(index 5)の間に縦線を入れる
-                if (index == 5) {
+                // 設定(index 4)の前に縦線を入れる
+                if (index == 4) {
                     Box(
                         modifier = Modifier
                             .height(24.dp)

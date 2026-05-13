@@ -215,54 +215,42 @@ fun PinKeypad(
         listOf("1", "2", "3"),
         listOf("4", "5", "6"),
         listOf("7", "8", "9"),
-        listOf("BS", "0", confirmLabel)
+        listOf("BS", "0", "OK") // Use "OK" internally, we'll label it as confirmLabel
     )
 
     Column(
         modifier = modifier.width(280.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         keys.forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 row.forEach { key ->
-                    val isAction = key == confirmLabel
+                    val isAction = key == "OK"
                     val isDelete = key == "BS"
                     
-                    if (key.isEmpty()) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    } else {
-                        Button(
-                            onClick = {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .aspectRatio(1.2f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (isAction) (if (isConfirmEnabled) NotionSafeGreen else NotionBorder) else Color.White)
+                            .then(if (!isAction || isConfirmEnabled) Modifier.clickable {
                                 when {
                                     isDelete -> onDeleteClick()
                                     isAction -> onConfirmClick()
                                     else -> onNumberClick(key)
                                 }
-                            },
-                            modifier = Modifier.weight(1f).aspectRatio(1.2f),
-                            enabled = if (isAction) isConfirmEnabled else true,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isAction) NotionSafeGreen else NotionWhite,
-                                contentColor = if (isAction) Color.White else NotionTextPrimary,
-                                disabledContainerColor = NotionBorder
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            border = if (!isAction) BorderStroke(1.dp, NotionBorder) else null,
-                            contentPadding = PaddingValues(0.dp),
-                            elevation = null
-                        ) {
-                            if (isDelete) {
-                                Icon(Icons.AutoMirrored.Filled.Backspace, null, modifier = Modifier.size(20.dp))
-                            } else {
-                                Text(
-                                    text = key,
-                                    fontSize = if (isAction) 15.sp else 22.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                            } else Modifier)
+                            .border(1.dp, if (isAction) Color.Transparent else NotionBorder, RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        when {
+                            isDelete -> Icon(Icons.AutoMirrored.Filled.Backspace, null, tint = NotionTextPrimary, modifier = Modifier.size(24.dp))
+                            isAction -> Text(text = confirmLabel, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            else -> Text(text = key, color = NotionTextPrimary, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }

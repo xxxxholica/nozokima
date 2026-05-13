@@ -598,42 +598,116 @@ fun AssetsScreen(
     }
 
     if (showAddItemDialog) {
-        AlertDialog(
+        ModalBottomSheet(
             onDismissRequest = { showAddItemDialog = false },
-            title = { Text("$selectedGroupTitle に追加", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    OutlinedTextField(value = editNameText, onValueChange = { editNameText = it }, label = { Text("名称（例: 楽天銀行）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Spacer(modifier = Modifier.height(16.dp))
-                    OutlinedTextField(
-                        value = editAmountText, 
-                        onValueChange = { editAmountText = it }, 
-                        label = { Text("金額（マイナス可）") }, 
-                        singleLine = true, 
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val amount = editAmountText.replace("−", "-").toIntOrNull() ?: 0
-                    scope.launch {
-                        dao.insertAsset(AssetEntity(
-                            id = UUID.randomUUID().toString(),
-                            name = editNameText.ifBlank { "新規項目" },
-                            amount = amount,
-                            category = selectedGroupTitle,
-                            lastUpdated = System.currentTimeMillis()
-                        ))
-                    }
-                    showAddItemDialog = false
-                }) { Text("追加", color = NotionSafeGreen) }
-            },
-            dismissButton = { TextButton(onClick = { showAddItemDialog = false }) { Text("キャンセル") } },
             containerColor = Color.White,
-            shape = RoundedCornerShape(12.dp)
-        )
+            dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            val spec = assetTypeUiSpec(selectedGroupTitle)
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(spec.accentColor.copy(alpha = 0.1f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(spec.icon, null, tint = spec.accentColor, modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(text = "$selectedGroupTitle に追加", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = NotionTextPrimary)
+                }
+                
+                Spacer(Modifier.height(24.dp))
+                
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, NotionBorder)
+                ) {
+                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
+                            Icon(Icons.Default.Label, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("資産の名称", fontSize = 12.sp, color = NotionTextSecondary)
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = editNameText,
+                                onValueChange = { editNameText = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                textStyle = androidx.compose.ui.text.TextStyle(color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                                decorationBox = { inner ->
+                                    if (editNameText.isEmpty()) Text("例: 楽天銀行", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
+                                    inner()
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(Modifier.height(16.dp))
+                
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = NotionBackground,
+                    border = BorderStroke(1.dp, NotionBorder)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("初期残高", fontSize = 12.sp, color = NotionTextSecondary)
+                        Text(
+                            text = if (editAmountText.isEmpty()) "¥ 0" else "¥ ${String.format(Locale.JAPAN, "%,d", editAmountText.toLongOrNull() ?: 0L)}",
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = spec.accentColor
+                        )
+                    }
+                }
+                
+                Spacer(Modifier.height(24.dp))
+                
+                CustomKeypad(
+                    onNumberClick = { num ->
+                        if (editAmountText == "0") editAmountText = num else editAmountText += num
+                    },
+                    onOperatorClick = { op ->
+                        if (editAmountText.isNotEmpty() && !editAmountText.last().toString().matches(Regex("[-+*/.]"))) editAmountText += op
+                    },
+                    onDeleteClick = {
+                        if (editAmountText.isNotEmpty()) editAmountText = editAmountText.dropLast(1)
+                    },
+                    onClearAllClick = { editAmountText = "" },
+                    onConfirmClick = {
+                        try { editAmountText = com.example.nozokima.util.evaluateExpression(editAmountText).toString() } catch (e: Exception) {}
+                    },
+                    onSaveClick = {
+                        val amountText = if (editAmountText.any { it in "+-*/" }) {
+                            try { com.example.nozokima.util.evaluateExpression(editAmountText).toString() } catch (e: Exception) { editAmountText }
+                        } else editAmountText
+                        
+                        val amount = amountText.replace("−", "-").toIntOrNull() ?: 0
+                        scope.launch {
+                            dao.insertAsset(AssetEntity(
+                                id = UUID.randomUUID().toString(),
+                                name = editNameText.ifBlank { "新規項目" },
+                                amount = amount,
+                                category = selectedGroupTitle,
+                                lastUpdated = System.currentTimeMillis()
+                            ))
+                        }
+                        showAddItemDialog = false
+                    },
+                    onCloseClick = { showAddItemDialog = false },
+                    isSaveEnabled = editNameText.isNotBlank(),
+                    actionColor = spec.accentColor
+                )
+                Spacer(Modifier.height(24.dp))
+            }
+        }
     }
 
     transactionToDelete?.let { tx ->
@@ -659,85 +733,180 @@ fun AssetsScreen(
     // --- 残高内訳 資産タップ時のアクションメニュー ---
     editingAssetEntity?.let { asset ->
         if (!showAssetAmountEdit && !showAssetDeleteConfirm) {
+            val spec = assetTypeUiSpec(asset.category)
             ModalBottomSheet(
                 onDismissRequest = { editingAssetEntity = null },
                 containerColor = Color.White,
-                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp).padding(bottom = 32.dp)) {
-                    Text(asset.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = NotionTextPrimary)
-                    Text("¥ ${String.format(Locale.JAPAN, "%,d", asset.amount)}", fontSize = 13.sp, color = NotionTextSecondary)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    ListItem(
-                        headlineContent = { Text("金額を編集", color = NotionTextPrimary) },
-                        leadingContent = { Icon(Icons.Default.Edit, contentDescription = null, tint = NotionSafeGreen) },
-                        modifier = Modifier.clickable {
-                            assetEditName = asset.name
-                            assetEditCategory = asset.category
-                            editAmountText = asset.amount.toString()
-                            showAssetAmountEdit = true
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
+                    // ヘッダー的な資産情報カード
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = NotionBackground,
+                        border = BorderStroke(1.dp, NotionBorder)
+                    ) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(spec.accentColor.copy(alpha = 0.1f), RoundedCornerShape(12.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(spec.icon, null, tint = spec.accentColor, modifier = Modifier.size(24.dp))
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(asset.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = NotionTextPrimary)
+                                Text(asset.category, fontSize = 12.sp, color = NotionTextSecondary)
+                            }
+                            Text(
+                                "¥ ${String.format(Locale.JAPAN, "%,d", asset.amount)}",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = spec.accentColor
+                            )
                         }
-                    )
-                    HorizontalDivider(color = NotionBorder)
-                    ListItem(
-                        headlineContent = { Text("削除", color = Color(0xFFD32F2F)) },
-                        leadingContent = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFD32F2F)) },
-                        modifier = Modifier.clickable { showAssetDeleteConfirm = true }
-                    )
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text("アクション", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NotionTextSecondary, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+                    
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.White,
+                        border = BorderStroke(1.dp, NotionBorder)
+                    ) {
+                        Column {
+                            ListItem(
+                                headlineContent = { Text("金額を修正する", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+                                supportingContent = { Text("現在の残高を直接書き換えます", fontSize = 12.sp) },
+                                leadingContent = { 
+                                    Box(modifier = Modifier.size(40.dp).background(NotionSafeGreen.copy(alpha = 0.08f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Edit, contentDescription = null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
+                                    }
+                                },
+                                modifier = Modifier.clickable {
+                                    editAmountText = asset.amount.toString()
+                                    showAssetAmountEdit = true
+                                }
+                            )
+                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = NotionBorder)
+                            ListItem(
+                                headlineContent = { Text("この資産を削除", color = Color(0xFFD32F2F), fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+                                supportingContent = { Text("資産一覧から削除します（履歴は保持されます）", fontSize = 12.sp) },
+                                leadingContent = { 
+                                    Box(modifier = Modifier.size(40.dp).background(Color(0xFFFFEBEE), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFD32F2F), modifier = Modifier.size(20.dp))
+                                    }
+                                },
+                                modifier = Modifier.clickable { showAssetDeleteConfirm = true }
+                            )
+                        }
+                    }
                 }
             }
         }
     }
 
-    // --- 金額編集ダイアログ ---
+    // --- 金額編集シート ---
     if (showAssetAmountEdit) {
         val asset = editingAssetEntity
         if (asset != null) {
-            AlertDialog(
+            val spec = assetTypeUiSpec(asset.category)
+            ModalBottomSheet(
                 onDismissRequest = { showAssetAmountEdit = false; editingAssetEntity = null },
-                title = { Text("金額を編集", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
-                text = {
-                    Column {
-                        Text(asset.name, fontSize = 14.sp, color = NotionTextSecondary)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = editAmountText,
-                            onValueChange = { editAmountText = it },
-                            label = { Text("金額（マイナス可）") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        val newAmount = editAmountText.replace("−", "-").toIntOrNull() ?: asset.amount
-                        val diff = newAmount - asset.amount
-                        scope.launch {
-                            dao.updateAsset(asset.copy(amount = newAmount, lastUpdated = System.currentTimeMillis()))
-                            if (diff != 0) {
-                                dao.insertTransaction(TransactionEntity(
-                                    id = UUID.randomUUID().toString(),
-                                    name = "${asset.name} 残高修正",
-                                    amount = kotlin.math.abs(diff),
-                                    category = asset.category,
-                                    date = System.currentTimeMillis(),
-                                    assetName = asset.name,
-                                    isExpense = diff < 0
-                                ))
-                            }
-                        }
-                        showAssetAmountEdit = false
-                        editingAssetEntity = null
-                    }) { Text("保存", color = NotionSafeGreen) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showAssetAmountEdit = false; editingAssetEntity = null }) { Text("キャンセル") }
-                },
                 containerColor = Color.White,
-                shape = RoundedCornerShape(12.dp)
-            )
+                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(spec.accentColor.copy(alpha = 0.1f), RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(spec.icon, null, tint = spec.accentColor, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(text = "金額を修正", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = NotionTextPrimary)
+                            Text(asset.name, fontSize = 12.sp, color = NotionTextSecondary)
+                        }
+                    }
+                    
+                    Spacer(Modifier.height(24.dp))
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = NotionBackground,
+                        border = BorderStroke(1.dp, NotionBorder)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("現在の残高", fontSize = 12.sp, color = NotionTextSecondary)
+                            Text(
+                                text = "¥ ${String.format(Locale.JAPAN, "%,d", editAmountText.toLongOrNull() ?: 0L)}",
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = spec.accentColor
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(24.dp))
+
+                    CustomKeypad(
+                        onNumberClick = { num ->
+                            if (editAmountText == "0") editAmountText = num else editAmountText += num
+                        },
+                        onOperatorClick = { op ->
+                            if (editAmountText.isNotEmpty() && !editAmountText.last().toString().matches(Regex("[-+*/.]"))) editAmountText += op
+                        },
+                        onDeleteClick = {
+                            if (editAmountText.isNotEmpty()) editAmountText = editAmountText.dropLast(1)
+                        },
+                        onClearAllClick = { editAmountText = "" },
+                        onConfirmClick = {
+                            try { editAmountText = com.example.nozokima.util.evaluateExpression(editAmountText).toString() } catch (e: Exception) {}
+                        },
+                        onSaveClick = {
+                            val amountText = if (editAmountText.any { it in "+-*/" }) {
+                                try { com.example.nozokima.util.evaluateExpression(editAmountText).toString() } catch (e: Exception) { editAmountText }
+                            } else editAmountText
+
+                            val newAmount = amountText.replace("−", "-").toIntOrNull() ?: asset.amount
+                            val diff = newAmount - asset.amount
+                            scope.launch {
+                                dao.updateAsset(asset.copy(amount = newAmount, lastUpdated = System.currentTimeMillis()))
+                                if (diff != 0) {
+                                    dao.insertTransaction(TransactionEntity(
+                                        id = UUID.randomUUID().toString(),
+                                        name = "${asset.name} 残高修正",
+                                        amount = kotlin.math.abs(diff),
+                                        category = asset.category,
+                                        date = System.currentTimeMillis(),
+                                        assetName = asset.name,
+                                        isExpense = diff < 0
+                                    ))
+                                }
+                            }
+                            showAssetAmountEdit = false
+                            editingAssetEntity = null
+                        },
+                        onCloseClick = { showAssetAmountEdit = false; editingAssetEntity = null },
+                        isSaveEnabled = true,
+                        actionColor = spec.accentColor
+                    )
+                    Spacer(Modifier.height(24.dp))
+                }
+            }
         }
     }
 

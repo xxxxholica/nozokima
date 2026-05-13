@@ -136,28 +136,12 @@ interface FinanceDao {
     @Query("DELETE FROM goal_settings")
     suspend fun deleteAllGoalSettings()
 
-    // バックアップ履歴
-    @Query("SELECT * FROM backup_history ORDER BY date DESC")
-    fun getAllBackupHistory(): Flow<List<BackupHistoryEntity>>
-
-    @Insert
-    suspend fun insertBackupHistory(history: BackupHistoryEntity)
-
-    @Delete
-    suspend fun deleteBackupHistory(history: BackupHistoryEntity)
-
-    @Query("DELETE FROM backup_history WHERE date < :timestamp")
-    suspend fun deleteOldBackupHistory(timestamp: Long)
-
-    @Query("SELECT * FROM backup_history")
-    suspend fun getAllBackupHistoryList(): List<BackupHistoryEntity>
-
-    @Query("DELETE FROM backup_history")
-    suspend fun deleteAllBackupHistory()
-
     // アプリ設定
     @Query("SELECT * FROM app_settings WHERE id = 1 LIMIT 1")
     fun getAppSettings(): Flow<AppSettingsEntity?>
+
+    @Query("SELECT * FROM app_settings WHERE id = 1 LIMIT 1")
+    suspend fun getAppSettingsSync(): AppSettingsEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAppSettings(settings: AppSettingsEntity)
@@ -165,9 +149,11 @@ interface FinanceDao {
     @Query("DELETE FROM app_settings")
     suspend fun deleteAllAppSettings()
 
-    // カテゴリ関連
     @Query("SELECT * FROM categories ORDER BY `order` ASC")
     fun getAllCategories(): Flow<List<CategoryEntity>>
+
+    @Query("SELECT * FROM categories ORDER BY `order` ASC")
+    suspend fun getAllCategoriesListSync(): List<CategoryEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCategory(category: CategoryEntity)
@@ -180,6 +166,9 @@ interface FinanceDao {
 
     @Query("SELECT COUNT(*) FROM categories")
     suspend fun getCategoryCount(): Int
+
+    @Query("DELETE FROM categories")
+    suspend fun deleteAllCategories()
 
     // 固定費関連
     @Query("SELECT * FROM recurring_transactions")
@@ -196,4 +185,7 @@ interface FinanceDao {
 
     @Delete
     suspend fun deleteRecurringTransaction(recurring: RecurringTransactionEntity)
+
+    @Query("DELETE FROM recurring_transactions")
+    suspend fun deleteAllRecurringTransactions()
 }
