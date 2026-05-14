@@ -1,6 +1,7 @@
 package com.example.nozokima.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -11,6 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -36,6 +38,7 @@ import com.example.nozokima.data.local.entities.*
 import com.example.nozokima.data.manager.*
 import com.example.nozokima.ui.components.CustomKeypad
 import com.example.nozokima.ui.components.InputTile
+import com.example.nozokima.ui.components.ScreenHeader
 import com.example.nozokima.util.evaluateExpression
 import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.launch
@@ -54,7 +57,8 @@ fun GoalSettingContent(
     goalAiText: String = "",
     onRefreshAi: () -> Unit = {},
     isKeypadVisible: Boolean = false,
-    onKeypadVisibilityChange: (Boolean) -> Unit = {}
+    onKeypadVisibilityChange: (Boolean) -> Unit = {},
+    onBack: () -> Unit = {}
 ) {
     val assets by dao.getAllAssets().collectAsState(initial = emptyList())
     val lendings by dao.getAllLendings().collectAsState(initial = emptyList())
@@ -117,7 +121,7 @@ fun GoalSettingContent(
     }
 
     // 計算
-    val remainingDays = ((targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
+    val remainingDays = ((targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(0)
     val remainingMonths = (remainingDays / 30.0).coerceAtLeast(0.1)
     val targetAmount = targetAmountText.toLongOrNull() ?: 0L
     val monthlyIncome = monthlyIncomeText.toLongOrNull() ?: 0L
@@ -138,16 +142,41 @@ fun GoalSettingContent(
     val canStart = targetAmount > actualTotalAssets && monthlyIncomeText.isNotEmpty()
 
     // 自動トリガー
-    LaunchedEffect(aiIsReady, showResults, isSimulationView, goalAiText) {
-        if (aiIsReady && (showResults || isSimulationView) && goalAiText.isEmpty() && !aiIsGenerating) {
+    LaunchedEffect(aiIsReady, currentStep) {
+        if (aiIsReady && (currentStep == 1 || currentStep == 2 || currentStep == 3) && !aiIsGenerating) {
             onRefreshAi()
         }
     }
 
+    // 達成履歴の自動記録 (削除されました)
+
+
     BackHandler(enabled = isKeypadVisible) { onKeypadVisibilityChange(false) }
+    BackHandler(enabled = !isKeypadVisible) { onBack() }
 
     Box(modifier = Modifier.fillMaxSize().background(NotionBackground)) {
         Column(modifier = Modifier.fillMaxSize()) {
+            val pageTitle = when (currentStep) {
+                3 -> "目標達成"
+                2 -> "目標経過"
+                1 -> "シミュレーション結果"
+                else -> "目標定義"
+            }
+            ScreenHeader(
+                title = pageTitle,
+                navigationIcon = {
+                    Surface(
+                        onClick = onBack,
+                        modifier = Modifier.size(36.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        color = NotionTextSecondary.copy(alpha = 0.1f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る", tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            )
             // 固定ヘッダー
             Column(modifier = Modifier.padding(horizontal = 20.dp)) {
                 GoalStepper(currentStep = currentStep)
@@ -155,96 +184,133 @@ fun GoalSettingContent(
 
             // スクロール可能なコンテンツエリア
             Box(modifier = Modifier.weight(1f)) {
-                Column(
-                    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-                        Spacer(Modifier.height(4.dp))
-                        when {
-                            goalAchieved -> {
-                                GoalAchievedView(
-                                    titleText = titleText,
-                                    targetAmount = targetAmount,
-                                    aiStatus = aiStatus,
-                                    aiIsReady = aiIsReady,
-                                    aiIsGenerating = aiIsGenerating,
-                                    showAiProgress = showAiProgress,
-                                    aiStatusLabel = aiStatusLabel,
-                                    goalAiText = goalAiText,
-                                    onRefreshAi = onRefreshAi,
-                                    onResetGoal = {
-                                        titleText = ""
-                                        targetAmountText = ""
-                                        monthlyIncomeText = ""
-                                        targetDateMillis = Calendar.getInstance().apply { add(Calendar.MONTH, 6) }.timeInMillis
-                                        startDateMillis = System.currentTimeMillis()
-                                        showResults = false
-                                        isSimulationView = false
-                                        saveGoal()
-                                    }
-                                )
+                AnimatedContent(
+                    targetState = currentStep,
+                    transitionSpec = {
+                        val direction = if (targetState > initialState) 
+                            AnimatedContentTransitionScope.SlideDirection.Left 
+                        else 
+                            AnimatedContentTransitionScope.SlideDirection.Right
+                        
+                        slideIntoContainer(direction) + fadeIn() togetherWith
+                        slideOutOfContainer(direction) + fadeOut()
+                    },
+                    label = "GoalContentTransition"
+                ) { targetStep ->
+                    Column(
+                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                            Spacer(Modifier.height(12.dp))
+                            when (targetStep) {
+                                3 -> {
+                                    GoalAchievedView(
+                                        titleText = titleText,
+                                        actualTotalAssets = actualTotalAssets,
+                                        targetAmount = targetAmount,
+                                        totalSpendable = totalSpendable,
+                                        monthlyBudget = monthlyBudget,
+                                        startDateMillis = startDateMillis,
+                                        targetDateMillis = targetDateMillis,
+                                        remainingDays = remainingDays,
+                                        aiStatus = aiStatus,
+                                        aiIsReady = aiIsReady,
+                                        aiIsGenerating = aiIsGenerating,
+                                        showAiProgress = showAiProgress,
+                                        aiStatusLabel = aiStatusLabel,
+                                        goalAiText = goalAiText,
+                                        onRefreshAi = onRefreshAi
+                                    )
+                                }
+                                2 -> {
+                                    GoalProgressView(
+                                        titleText = titleText,
+                                        actualTotalAssets = actualTotalAssets,
+                                        targetAmount = targetAmount,
+                                        totalSpendable = totalSpendable,
+                                        monthlyBudget = monthlyBudget,
+                                        startDateMillis = startDateMillis,
+                                        targetDateMillis = targetDateMillis,
+                                        remainingDays = remainingDays,
+                                        aiStatus = aiStatus,
+                                        aiIsReady = aiIsReady,
+                                        aiIsGenerating = aiIsGenerating,
+                                        showAiProgress = showAiProgress,
+                                        aiStatusLabel = aiStatusLabel,
+                                        goalAiText = goalAiText,
+                                        onRefreshAi = onRefreshAi
+                                    )
+                                }
+                                1 -> {
+                                    GoalSimulationView(
+                                        actualTotalAssets = actualTotalAssets,
+                                        totalSpendable = totalSpendable,
+                                        monthlyBudget = monthlyBudget
+                                    )
+                                }
+                                else -> {
+                                    GoalSetupView(
+                                        titleText = titleText,
+                                        onTitleChange = { titleText = it; saveGoal() },
+                                        targetAmountText = targetAmountText,
+                                        onAmountClick = {
+                                            focusManager.clearFocus()
+                                            goalKeypadTarget = "amount"
+                                            onKeypadVisibilityChange(true)
+                                        },
+                                        monthlyIncomeText = monthlyIncomeText,
+                                        onIncomeClick = {
+                                            focusManager.clearFocus()
+                                            goalKeypadTarget = "income"
+                                            onKeypadVisibilityChange(true)
+                                        },
+                                        targetDateMillis = targetDateMillis,
+                                        onDateClick = {
+                                            focusManager.clearFocus()
+                                            showDatePicker = true
+                                        },
+                                        dateFormatter = dateFormatter,
+                                        isAmountTooLow = isAmountTooLow
+                                    )
+                                }
                             }
-                            showResults -> {
-                                GoalProgressView(
-                                    titleText = titleText,
-                                    actualTotalAssets = actualTotalAssets,
-                                    targetAmount = targetAmount,
-                                    startDateMillis = startDateMillis,
-                                    targetDateMillis = targetDateMillis,
-                                    remainingDays = remainingDays,
-                                    aiStatus = aiStatus,
-                                    aiIsReady = aiIsReady,
-                                    aiIsGenerating = aiIsGenerating,
-                                    showAiProgress = showAiProgress,
-                                    aiStatusLabel = aiStatusLabel,
-                                    goalAiText = goalAiText,
-                                    onRefreshAi = onRefreshAi
-                                )
-                            }
-                            isSimulationView -> {
-                                GoalSimulationView(
-                                    actualTotalAssets = actualTotalAssets,
-                                    totalSpendable = totalSpendable,
-                                    monthlyBudget = monthlyBudget
-                                )
-                            }
-                            else -> {
-                                GoalSetupView(
-                                    titleText = titleText,
-                                    onTitleChange = { titleText = it; saveGoal() },
-                                    targetAmountText = targetAmountText,
-                                    onAmountClick = {
-                                        focusManager.clearFocus()
-                                        goalKeypadTarget = "amount"
-                                        onKeypadVisibilityChange(true)
-                                    },
-                                    monthlyIncomeText = monthlyIncomeText,
-                                    onIncomeClick = {
-                                        focusManager.clearFocus()
-                                        goalKeypadTarget = "income"
-                                        onKeypadVisibilityChange(true)
-                                    },
-                                    targetDateMillis = targetDateMillis,
-                                    onDateClick = {
-                                        focusManager.clearFocus()
-                                        showDatePicker = true
-                                    },
-                                    dateFormatter = dateFormatter,
-                                    isAmountTooLow = isAmountTooLow
-                                )
-                            }
+                            
+                            Spacer(Modifier.height(24.dp))
                         }
-                        Spacer(Modifier.height(8.dp))
                     }
                 }
             }
 
             // 下部固定ボタンエリア
-            Column(modifier = Modifier.padding(20.dp, 8.dp, 20.dp, 24.dp)) {
-                when {
-                    goalAchieved -> { /* GoalAchievedView内にリセットボタンがあるためここでは表示しない */ }
-                    showResults -> {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 8.dp, bottom = 24.dp)
+            ) {
+                when (currentStep) {
+                    3 -> {
+                        Button(
+                            onClick = {
+                                titleText = ""
+                                targetAmountText = ""
+                                monthlyIncomeText = ""
+                                targetDateMillis = Calendar.getInstance().apply { add(Calendar.MONTH, 6) }.timeInMillis
+                                startDateMillis = System.currentTimeMillis()
+                                showResults = false
+                                isSimulationView = false
+                                saveGoal()
+                            },
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen)
+                        ) {
+                            Icon(Icons.Default.Refresh, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("次の目標を設定する", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    2 -> {
                         OutlinedButton(
                             onClick = {
                                 showResults = false
@@ -260,7 +326,7 @@ fun GoalSettingContent(
                             Text("設定を変更する", color = NotionTextSecondary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         }
                     }
-                    isSimulationView -> {
+                    1 -> {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedButton(
                                 onClick = { isSimulationView = false },
@@ -272,11 +338,13 @@ fun GoalSettingContent(
                             }
                             Button(
                                 onClick = {
-                                    showResults = true
-                                    if (startDateMillis == 0L || (goalSetting?.startDateMillis ?: 0L) == 0L) {
-                                        startDateMillis = System.currentTimeMillis()
+                                    scope.launch {
+                                        showResults = true
+                                        if (startDateMillis == 0L || (goalSetting?.startDateMillis ?: 0L) == 0L) {
+                                            startDateMillis = System.currentTimeMillis()
+                                        }
+                                        saveGoal()
                                     }
-                                    saveGoal()
                                 },
                                 modifier = Modifier.weight(2f).height(52.dp),
                                 shape = RoundedCornerShape(12.dp),
@@ -384,57 +452,57 @@ fun GoalSettingContent(
 @Composable
 fun GoalAchievedView(
     titleText: String,
+    actualTotalAssets: Long,
     targetAmount: Long,
+    totalSpendable: Long,
+    monthlyBudget: Long,
+    startDateMillis: Long,
+    targetDateMillis: Long,
+    remainingDays: Int,
     aiStatus: Int,
     aiIsReady: Boolean,
     aiIsGenerating: Boolean,
     showAiProgress: Boolean,
     aiStatusLabel: String?,
     goalAiText: String,
-    onRefreshAi: () -> Unit,
-    onResetGoal: () -> Unit
+    onRefreshAi: () -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFFFFF9E6), RoundedCornerShape(16.dp))
-            .border(1.5.dp, Color(0xFFFFD54F), RoundedCornerShape(16.dp))
-            .padding(horizontal = 20.dp, vertical = 16.dp)
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-            Text("🎉 Congratulations! 🎉", color = Color(0xFFF57F17), fontSize = 20.sp, fontWeight = FontWeight.Black)
-            Spacer(Modifier.height(6.dp))
-            val achievementTitle = if (titleText.isNotEmpty()) "「${titleText}」達成おめでとうございます" else "目標達成おめでとうございます"
-            Text(achievementTitle, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(12.dp))
-            Text("¥ ${String.format(Locale.JAPAN, "%,d", targetAmount)}", color = Color(0xFFF57F17), fontSize = 36.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFFFFF9E6),
+            border = BorderStroke(2.dp, Color(0xFFFFD54F))
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(vertical = 20.dp, horizontal = 16.dp)
+            ) {
+                Text("🎉 Congratulations! 🎉", color = Color(0xFFF57F17), fontSize = 24.sp, fontWeight = FontWeight.Black)
+                Spacer(Modifier.height(8.dp))
+                val achievementTitle = if (titleText.isNotEmpty()) "「${titleText}」を達成しました！" else "目標を達成しました！"
+                Text(achievementTitle, color = NotionTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
         }
-    }
 
-    Spacer(Modifier.height(24.dp))
-
-    AiAdvisorCard(
-        aiStatus = aiStatus,
-        aiIsReady = aiIsReady,
-        aiIsGenerating = aiIsGenerating,
-        showAiProgress = showAiProgress,
-        aiStatusLabel = aiStatusLabel,
-        goalAiText = goalAiText,
-        onRefreshAi = onRefreshAi,
-        defaultText = "目標達成おめでとうございます！これからもあなたの資産を覗き続けますよ。"
-    )
-
-    Spacer(Modifier.height(16.dp))
-
-    Button(
-        onClick = onResetGoal,
-        modifier = Modifier.fillMaxWidth().height(52.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen)
-    ) {
-        Icon(Icons.Default.Refresh, null, tint = Color.White, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(8.dp))
-        Text("次の目標を設定する", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        GoalProgressView(
+            titleText = titleText,
+            actualTotalAssets = actualTotalAssets,
+            targetAmount = targetAmount,
+            totalSpendable = totalSpendable,
+            monthlyBudget = monthlyBudget,
+            startDateMillis = startDateMillis,
+            targetDateMillis = targetDateMillis,
+            remainingDays = remainingDays,
+            aiStatus = aiStatus,
+            aiIsReady = aiIsReady,
+            aiIsGenerating = aiIsGenerating,
+            showAiProgress = showAiProgress,
+            aiStatusLabel = aiStatusLabel,
+            goalAiText = goalAiText,
+            onRefreshAi = onRefreshAi,
+            showSimulationTiles = false
+        )
     }
 }
 
@@ -452,99 +520,93 @@ fun GoalSetupView(
     isAmountTooLow: Boolean
 ) {
     val focusManager = LocalFocusManager.current
-    SectionLabel("目標の定義")
-    Spacer(Modifier.height(12.dp))
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Surface(
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SetupTile(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            color = Color.White,
-            border = BorderStroke(1.dp, NotionBorder)
+            icon = Icons.Default.Flag,
+            label = "目標タイトル",
+            color = NotionSafeGreen
         ) {
-            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
-                    Icon(Icons.Default.Flag, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("目標タイトル", fontSize = 12.sp, color = NotionTextSecondary)
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = titleText,
-                        onValueChange = onTitleChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        textStyle = androidx.compose.ui.text.TextStyle(color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
-                        decorationBox = { inner ->
-                            if (titleText.isEmpty()) Text("旅行のための貯金", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
-                            inner()
-                        },
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focusManager.clearFocus() })
-                    )
-                }
-            }
+            androidx.compose.foundation.text.BasicTextField(
+                value = titleText,
+                onValueChange = onTitleChange,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(color = NotionTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold),
+                decorationBox = { inner ->
+                    if (titleText.isEmpty()) Text("旅行など", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 16.sp)
+                    inner()
+                },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focusManager.clearFocus() })
+            )
         }
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            color = Color.White,
-            border = BorderStroke(1.dp, if (isAmountTooLow) Color(0xFFE57373) else NotionBorder)
+        SetupTile(
+            modifier = Modifier.fillMaxWidth().clickable { onAmountClick() },
+            icon = Icons.Default.Star,
+            label = "目標貯金額",
+            color = if (isAmountTooLow) Color(0xFFE57373) else NotionSafeGreen
         ) {
-            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = (if (isAmountTooLow) Color(0xFFE57373) else NotionSafeGreen).copy(alpha = 0.08f)) {
-                    Icon(Icons.Default.Star, null, tint = if (isAmountTooLow) Color(0xFFE57373) else NotionSafeGreen, modifier = Modifier.padding(10.dp))
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f).clickable { onAmountClick() }) {
-                    Text("目標貯金額", fontSize = 12.sp, color = NotionTextSecondary)
-                    Text(
-                        text = if (targetAmountText.isEmpty()) "¥ " else "¥ ${String.format(Locale.JAPAN, "%,d", targetAmountText.toLongOrNull() ?: 0L)}",
-                        color = when {
-                            isAmountTooLow -> Color(0xFFE57373)
-                            targetAmountText.isEmpty() -> NotionSafeGreen.copy(alpha = 0.5f)
-                            else -> NotionSafeGreen
-                        },
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    if (isAmountTooLow) {
-                        Text("現在の資産より高い金額を設定してください", color = Color(0xFFE57373), fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
+            Text(
+                text = if (targetAmountText.isEmpty()) "¥ 0" else "¥ ${String.format(Locale.JAPAN, "%,d", targetAmountText.toLongOrNull() ?: 0L)}",
+                color = if (isAmountTooLow) Color(0xFFE57373) else NotionTextPrimary,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Black
+            )
         }
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            color = Color.White,
-            border = BorderStroke(1.dp, NotionBorder)
+        SetupTile(
+            modifier = Modifier.fillMaxWidth().clickable { onIncomeClick() },
+            icon = Icons.AutoMirrored.Filled.TrendingUp,
+            label = "平均月収",
+            color = NotionSafeGreen
         ) {
-            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
-                    Icon(Icons.AutoMirrored.Filled.TrendingUp, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f).clickable { onIncomeClick() }) {
-                    Text("月平均の手取り収入", fontSize = 12.sp, color = NotionTextSecondary)
-                    Text(
-                        text = if (monthlyIncomeText.isEmpty()) "¥ " else "¥ ${String.format(Locale.JAPAN, "%,d", monthlyIncomeText.toLongOrNull() ?: 0L)}",
-                        color = if (monthlyIncomeText.isEmpty()) NotionSafeGreen.copy(alpha = 0.5f) else NotionSafeGreen,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
+            Text(
+                text = if (monthlyIncomeText.isEmpty()) "¥ 0" else "¥ ${String.format(Locale.JAPAN, "%,d", monthlyIncomeText.toLongOrNull() ?: 0L)}",
+                color = NotionTextPrimary,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Black
+            )
         }
-
-        InputTile(
+        SetupTile(
+            modifier = Modifier.fillMaxWidth().clickable { onDateClick() },
             icon = Icons.Default.CalendarMonth,
             label = "目標達成日",
-            value = dateFormatter.format(Date(targetDateMillis)),
-            onClick = onDateClick,
-            accentColor = NotionSafeGreen
-        )
+            color = NotionSafeGreen
+        ) {
+            Text(
+                text = dateFormatter.format(Date(targetDateMillis)),
+                color = NotionTextPrimary,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Black
+            )
+        }
+    }
+}
+
+@Composable
+fun SetupTile(
+    modifier: Modifier = Modifier,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    color: Color,
+    content: @Composable () -> Unit
+) {
+    Surface(
+        modifier = modifier.height(80.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, NotionBorder)
+    ) {
+        Row(modifier = Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(Modifier.size(36.dp), shape = RoundedCornerShape(10.dp), color = color.copy(alpha = 0.08f)) {
+                Icon(icon, null, tint = color, modifier = Modifier.padding(8.dp))
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, fontSize = 11.sp, color = NotionTextSecondary, fontWeight = FontWeight.Medium)
+                content()
+            }
+        }
     }
 }
 
@@ -554,8 +616,6 @@ fun GoalSimulationView(
     totalSpendable: Long,
     monthlyBudget: Long
 ) {
-    SectionLabel("シミュレーション結果")
-    Spacer(Modifier.height(12.dp))
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SimulationTile(icon = Icons.Default.AccountBalance, label = "現在の保有資産", value = actualTotalAssets, color = Color(0xFFFFB74D))
         SimulationTile(icon = Icons.Default.Wallet, label = "合計の許容支出", value = totalSpendable, color = Color(0xFF2196F3))
@@ -566,19 +626,19 @@ fun GoalSimulationView(
 @Composable
 fun SimulationTile(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: Long, color: Color) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().height(80.dp),
         shape = RoundedCornerShape(16.dp),
         color = Color.White,
         border = BorderStroke(1.dp, NotionBorder)
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = color.copy(alpha = 0.08f)) {
-                Icon(icon, null, tint = color, modifier = Modifier.padding(10.dp))
+            Surface(Modifier.size(36.dp), shape = RoundedCornerShape(10.dp), color = color.copy(alpha = 0.08f)) {
+                Icon(icon, null, tint = color, modifier = Modifier.padding(8.dp))
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(label, fontSize = 12.sp, color = NotionTextSecondary)
-                Text("¥ ${String.format(Locale.JAPAN, "%,d", value)}", color = color, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(label, fontSize = 11.sp, color = NotionTextSecondary, fontWeight = FontWeight.Medium)
+                Text("¥ ${String.format(Locale.JAPAN, "%,d", value)}", color = color, fontSize = 20.sp, fontWeight = FontWeight.Black)
             }
         }
     }
@@ -589,6 +649,8 @@ fun GoalProgressView(
     titleText: String,
     actualTotalAssets: Long,
     targetAmount: Long,
+    totalSpendable: Long,
+    monthlyBudget: Long,
     startDateMillis: Long,
     targetDateMillis: Long,
     remainingDays: Int,
@@ -598,7 +660,8 @@ fun GoalProgressView(
     showAiProgress: Boolean,
     aiStatusLabel: String?,
     goalAiText: String,
-    onRefreshAi: () -> Unit
+    onRefreshAi: () -> Unit,
+    showSimulationTiles: Boolean = true
 ) {
     val progressRatio = if (targetAmount > 0) (actualTotalAssets.toFloat() / targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
     val progressPercent = (progressRatio * 100).toInt()
@@ -606,32 +669,55 @@ fun GoalProgressView(
     val totalGoalDays = ((targetDateMillis - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(1L)
     val passedDays = ((System.currentTimeMillis() - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
     val timeProgressRatio = (passedDays.toFloat() / totalGoalDays.toFloat()).coerceIn(0f, 1f)
+    val dateFormatter = remember { SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN) }
 
-    Column {
-        val statusTitle = if (titleText.isNotEmpty()) titleText else "貯金"
-        SectionLabel("$statusTitle の進捗")
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = buildAnnotatedString {
-                withStyle(SpanStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold)) {
-                    append("¥ ${String.format(Locale.JAPAN, "%,d", actualTotalAssets)}")
-                }
-                withStyle(SpanStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium, color = NotionTextSecondary)) {
-                    append(" / ¥ ${String.format(Locale.JAPAN, "%,d", targetAmount)}")
-                }
-            },
-            color = Color(0xFF2196F3),
-            letterSpacing = (-1).sp
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Full Width Row: Assets/Target
+        PriceProgressTile(
+            actual = actualTotalAssets,
+            target = targetAmount,
+            modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        // Grid Row: Achievement & Time
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ProgressTile(
+                icon = Icons.Default.EmojiEvents,
+                label = "達成率",
+                percent = progressPercent,
+                ratio = progressRatio,
+                color = Color(0xFF2196F3),
+                modifier = Modifier.weight(1f)
+            )
+            ProgressTile(
+                icon = Icons.Default.Timer,
+                label = "期限",
+                extra = if (remainingDays > 0) "$remainingDays 日" else "本日",
+                ratio = timeProgressRatio,
+                color = NotionSafeGreen,
+                modifier = Modifier.weight(1f)
+            )
+        }
 
-        ProgressIndicatorRow(label = "目標達成", percent = progressPercent, ratio = progressRatio, color = Color(0xFF2196F3))
-        Spacer(modifier = Modifier.height(12.dp))
-        ProgressIndicatorRow(label = "期限", extra = "あと $remainingDays 日", ratio = timeProgressRatio, color = NotionSafeGreen)
-
-        Spacer(modifier = Modifier.height(20.dp))
+        // Grid Row: Spendable & Budget
+        if (showSimulationTiles) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CompactSimulationTile(
+                    icon = Icons.Default.Wallet,
+                    label = "許容支出",
+                    value = totalSpendable,
+                    color = Color(0xFF2196F3),
+                    modifier = Modifier.weight(1f)
+                )
+                CompactSimulationTile(
+                    icon = Icons.Default.CalendarMonth,
+                    label = "月の予算",
+                    value = monthlyBudget,
+                    color = Color(0xFF2196F3),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
 
         AiAdvisorCard(
             aiStatus = aiStatus,
@@ -646,21 +732,143 @@ fun GoalProgressView(
 }
 
 @Composable
-fun ProgressIndicatorRow(label: String, percent: Int? = null, extra: String? = null, ratio: Float, color: Color) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-            Text(label, color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-            if (percent != null) Text("$percent%", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            if (extra != null) Text(extra, color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+fun PriceProgressTile(
+    actual: Long,
+    target: Long,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.height(110.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, NotionBorder)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(28.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF2196F3).copy(alpha = 0.08f)
+                ) {
+                    Icon(Icons.Default.AccountBalance, null, tint = Color(0xFF2196F3), modifier = Modifier.padding(6.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Text("貯蓄状況", fontSize = 12.sp, color = NotionTextSecondary, fontWeight = FontWeight.Medium)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = "¥ ${String.format(Locale.JAPAN, "%,d", actual)}",
+                    color = Color(0xFF2196F3),
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Black
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = "/ ¥ ${String.format(Locale.JAPAN, "%,d", target)}",
+                    color = NotionTextSecondary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        LinearProgressIndicator(
-            progress = { ratio },
-            modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)),
-            color = color,
-            trackColor = NotionBorder,
-            strokeCap = StrokeCap.Round
-        )
+    }
+}
+
+
+
+@Composable
+fun ProgressTile(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    percent: Int? = null,
+    extra: String? = null,
+    ratio: Float,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.height(110.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, NotionBorder)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(28.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = color.copy(alpha = 0.08f)
+                ) {
+                    Icon(icon, null, tint = color, modifier = Modifier.padding(6.dp))
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(label, color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
+            
+            Spacer(modifier = Modifier.height(6.dp))
+            
+            Row(verticalAlignment = Alignment.Bottom) {
+                if (percent != null) {
+                    Text("$percent", color = NotionTextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                    Text("%", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 2.dp, start = 1.dp))
+                }
+                if (extra != null) {
+                    Text(extra, color = NotionTextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(6.dp))
+            
+            LinearProgressIndicator(
+                progress = { ratio },
+                modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                color = color,
+                trackColor = NotionBorder,
+                strokeCap = StrokeCap.Round
+            )
+        }
+    }
+}
+
+
+
+@Composable
+fun CompactSimulationTile(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    value: Long,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.height(110.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, NotionBorder)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(28.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = color.copy(alpha = 0.08f)
+                ) {
+                    Icon(icon, null, tint = color, modifier = Modifier.padding(6.dp))
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(label, fontSize = 12.sp, color = NotionTextSecondary, fontWeight = FontWeight.Medium)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "¥ ${String.format(Locale.JAPAN, "%,d", value)}",
+                color = color,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = (-0.5).sp
+            )
+        }
     }
 }
 
@@ -678,9 +886,9 @@ fun AiAdvisorCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 200.dp)
-            .background(Color(0xFFF5F5F5), RoundedCornerShape(10.dp))
-            .padding(12.dp)
+            .heightIn(min = 240.dp)
+            .background(Color(0xFFF5F5F5), RoundedCornerShape(16.dp))
+            .padding(16.dp)
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -760,7 +968,4 @@ private fun GoalStepper(currentStep: Int) {
     }
 }
 
-@Composable
-private fun SectionLabel(text: String) {
-    Text(text, color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
-}
+

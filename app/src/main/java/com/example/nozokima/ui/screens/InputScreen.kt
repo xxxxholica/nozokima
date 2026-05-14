@@ -47,6 +47,7 @@ import com.example.nozokima.model.*
 import com.example.nozokima.data.local.*
 import com.example.nozokima.data.local.entities.*
 import com.example.nozokima.data.manager.*
+import com.example.nozokima.ui.components.AssetCategoryTile
 import com.example.nozokima.ui.components.CustomKeypad
 import com.example.nozokima.ui.components.InputTile
 import com.example.nozokima.ui.components.ScreenHeader
@@ -824,22 +825,29 @@ fun InputScreen(
         if (showCategorySheet) {
             ModalBottomSheet(
                 onDismissRequest = { showCategorySheet = false },
-                containerColor = Color.White
+                containerColor = Color.White,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
             ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-                    Text("カテゴリーを選択", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
-                    LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.padding(horizontal = 12.dp)) {
-                        items(categories) { cat ->
-                            Column(
-                                modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { selectedCategory = cat; showCategorySheet = false }.padding(12.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Surface(modifier = Modifier.size(48.dp), shape = CircleShape, color = if (selectedCategory == cat) accentColor.copy(alpha = 0.1f) else NotionBackground) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(cat.icon, null, tint = if (selectedCategory == cat) accentColor else NotionTextSecondary)
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
+                    Text("カテゴリーを選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NotionTextPrimary)
+                    
+                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                        categories.chunked(4).forEach { rowItems ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                rowItems.forEach { cat ->
+                                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                        val isSelected = selectedCategory == cat
+                                        AssetCategoryTile(
+                                            label = cat.name,
+                                            icon = cat.icon,
+                                            color = if (isSelected) accentColor else NotionTextSecondary,
+                                            onClick = { selectedCategory = cat; showCategorySheet = false }
+                                        )
                                     }
                                 }
-                                Text(cat.name, fontSize = 12.sp)
+                                repeat(4 - rowItems.size) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
                             }
                         }
                     }
@@ -848,16 +856,32 @@ fun InputScreen(
         }
 
         if (showAssetSheet) {
-            ModalBottomSheet(onDismissRequest = { showAssetSheet = false }) {
-                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
-                    Text("資産を選択", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
-                    dbAssets.forEach { asset ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().clickable { selectedAssetEntity = asset; showAssetSheet = false }.padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(asset.name)
-                            Text("¥ ${String.format(Locale.JAPAN, "%,d", asset.amount)}")
+            ModalBottomSheet(
+                onDismissRequest = { showAssetSheet = false },
+                containerColor = Color.White,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
+                    Text("資産を選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NotionTextPrimary)
+                    
+                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                        dbAssets.chunked(4).forEach { rowItems ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                rowItems.forEach { asset ->
+                                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                        val isSelected = selectedAssetEntity == asset
+                                        AssetCategoryTile(
+                                            label = asset.name,
+                                            subLabel = "¥${String.format(Locale.JAPAN, "%,d", asset.amount)}",
+                                            color = if (isSelected) accentColor else null,
+                                            onClick = { selectedAssetEntity = asset; showAssetSheet = false }
+                                        )
+                                    }
+                                }
+                                repeat(4 - rowItems.size) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
                         }
                     }
                 }
@@ -865,16 +889,32 @@ fun InputScreen(
         }
 
         if (showToAssetSheet) {
-            ModalBottomSheet(onDismissRequest = { showToAssetSheet = false }) {
-                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
-                    Text("振替先資産を選択", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
-                    dbAssets.forEach { asset ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().clickable { selectedToAssetEntity = asset; showToAssetSheet = false }.padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(asset.name)
-                            Text("¥ ${String.format(Locale.JAPAN, "%,d", asset.amount)}")
+            ModalBottomSheet(
+                onDismissRequest = { showToAssetSheet = false },
+                containerColor = Color.White,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
+                    Text("振替先を選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NotionTextPrimary)
+                    
+                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                        dbAssets.chunked(4).forEach { rowItems ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                rowItems.forEach { asset ->
+                                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                        val isSelected = selectedToAssetEntity == asset
+                                        AssetCategoryTile(
+                                            label = asset.name,
+                                            subLabel = "¥${String.format(Locale.JAPAN, "%,d", asset.amount)}",
+                                            color = if (isSelected) accentColor else null,
+                                            onClick = { selectedToAssetEntity = asset; showToAssetSheet = false }
+                                        )
+                                    }
+                                }
+                                repeat(4 - rowItems.size) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
                         }
                     }
                 }

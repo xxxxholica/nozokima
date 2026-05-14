@@ -46,13 +46,12 @@ fun HomeScreen(
     onConsultClick: (Transaction) -> Unit = {},
     onAiAdviceClick: (String) -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
-    onCategoryClick: (String) -> Unit = {}
+    onCategoryClick: (String) -> Unit = {},
+    onGoalClick: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val appSettings by dao.getAppSettings().collectAsState(initial = null)
     val scope = rememberCoroutineScope()
-    var showGoalSetting by remember { mutableStateOf(false) }
-    var isGoalKeypadVisible by remember { mutableStateOf(false) }
 
     val greeting = remember {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
@@ -85,7 +84,7 @@ fun HomeScreen(
                 appSettings = appSettings,
                 onRefreshAi = { viewModel.triggerHomeAnalysis() },
                 onAiAdviceClick = onAiAdviceClick,
-                onGoalClick = { showGoalSetting = true },
+                onGoalClick = onGoalClick,
                 onToggleAssetsVisibility = {
                     scope.launch {
                         val current = appSettings ?: AppSettingsEntity()
@@ -109,29 +108,6 @@ fun HomeScreen(
             )
 
             Spacer(modifier = Modifier.height(40.dp))
-        }
-    }
-
-    if (showGoalSetting) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(
-            onDismissRequest = { showGoalSetting = false },
-            sheetState = sheetState,
-            containerColor = NotionBackground,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
-            modifier = Modifier.fillMaxHeight(0.70f)
-        ) {
-            GoalSettingContent(
-                dao = dao,
-                aiStatus = uiState.aiStatus,
-                aiIsReady = uiState.isAiReady,
-                aiIsGenerating = uiState.isAiGenerating,
-                aiIsChecking = uiState.isAiCheckingStatus,
-                goalAiText = uiState.goalAiText,
-                onRefreshAi = { viewModel.triggerGoalAnalysis() },
-                isKeypadVisible = isGoalKeypadVisible,
-                onKeypadVisibilityChange = { isGoalKeypadVisible = it }
-            )
         }
     }
 }

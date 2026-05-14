@@ -24,6 +24,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.nozokima.model.assetTypeUiSpec
@@ -187,6 +189,50 @@ fun AssetGroupItemRow(label: String, onClick: () -> Unit) {
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = NotionTextSecondary, modifier = Modifier.size(20.dp))
     }
     HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp), thickness = 0.5.dp, color = NotionBorder)
+}
+
+@Composable
+fun AssetCategoryTile(label: String, icon: ImageVector? = null, color: Color? = null, subLabel: String? = null, onClick: () -> Unit) {
+    val spec = if (icon == null) assetTypeUiSpec(label) else null
+    val targetIcon = icon ?: spec?.icon ?: Icons.Default.MoreHoriz
+    val targetColor = color ?: spec?.accentColor ?: NotionTextPrimary
+
+    Column(
+        modifier = Modifier
+            .width(74.dp)
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .background(targetColor.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                .border(1.dp, targetColor.copy(alpha = 0.12f), RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(targetIcon, null, tint = targetColor, modifier = Modifier.size(24.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = label,
+            color = NotionTextPrimary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        if (subLabel != null) {
+            Text(
+                text = subLabel,
+                color = NotionTextSecondary,
+                fontSize = 9.sp,
+                textAlign = TextAlign.Center,
+                maxLines = 1
+            )
+        }
+    }
 }
 
 @Composable

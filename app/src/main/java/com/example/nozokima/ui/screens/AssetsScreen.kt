@@ -220,7 +220,7 @@ fun AssetsScreen(
                         }
 
                         UnifiedAssetCardRow(
-                            title = "未回収の貸付金総額",
+                            title = "貸付金",
                             subtitle = "貸付",
                             amount = totalLendingAsset,
                             icon = assetTypeUiSpec("貸付").icon,
@@ -478,15 +478,27 @@ fun AssetsScreen(
             containerColor = Color.White,
             dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
         ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
-                Text("追加する資産カテゴリを選択", modifier = Modifier.padding(16.dp), color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                assetGroups.forEach { group ->
-                    AssetGroupItemRow(group) {
-                        selectedGroupTitle = group
-                        editNameText = ""
-                        editAmountText = ""
-                        showGroupSheet = false
-                        showAddItemDialog = true
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
+                Text("カテゴリを選択", modifier = Modifier.padding(vertical = 16.dp), color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                
+                Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    assetGroups.chunked(4).forEach { rowItems ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            rowItems.forEach { group ->
+                                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                    AssetCategoryTile(group) {
+                                        selectedGroupTitle = group
+                                        editNameText = ""
+                                        editAmountText = ""
+                                        showGroupSheet = false
+                                        showAddItemDialog = true
+                                    }
+                                }
+                            }
+                            repeat(4 - rowItems.size) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
                     }
                 }
             }

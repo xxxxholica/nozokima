@@ -11,6 +11,7 @@ import androidx.biometric.BiometricManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -116,6 +117,7 @@ class MainActivity : FragmentActivity() {
             val homeViewModel: HomeViewModel = viewModel(factory = factory)
             
             val mainUiState by mainViewModel.uiState.collectAsState()
+            val homeUiState by homeViewModel.uiState.collectAsState()
             val scope = rememberCoroutineScope()
             val snackbarHostState = remember { SnackbarHostState() }
 
@@ -228,7 +230,7 @@ class MainActivity : FragmentActivity() {
                 }
             }
 
-            // デフォルトカテゴリの初期化
+            // デフォルトカテゴリと資産の初期化
             LaunchedEffect(Unit) {
                 scope.launch {
                     if (dao.getAppSettingsSync() == null) {
@@ -251,6 +253,16 @@ class MainActivity : FragmentActivity() {
                             CategoryEntity(UUID.randomUUID().toString(), "還付金", "INCOME", "Info", true, 12)
                         )
                         defaultCategories.forEach { dao.insertCategory(it) }
+                    }
+                    if (dao.getAllAssetsList().isEmpty()) {
+                        val now = System.currentTimeMillis()
+                        val defaultAssets = listOf(
+                            AssetEntity(UUID.randomUUID().toString(), "現金", 0, "現金", now),
+                            AssetEntity(UUID.randomUUID().toString(), "銀行", 0, "銀行", now),
+                            AssetEntity(UUID.randomUUID().toString(), "電子マネー", 0, "電子マネー", now),
+                            AssetEntity(UUID.randomUUID().toString(), "カード", 0, "カード", now)
+                        )
+                        defaultAssets.forEach { dao.insertAsset(it) }
                     }
                 }
             }
@@ -607,101 +619,128 @@ class MainActivity : FragmentActivity() {
                             Scaffold(
                                 contentWindowInsets = WindowInsets.systemBars,
                                 bottomBar = {
-                                    if (!isKeyboardVisible) {
+                                    if (!isKeyboardVisible && selectedTab <= 4) {
                                         Spacer(modifier = Modifier.fillMaxWidth().navigationBarsPadding().height(80.dp))
                                     }
                                 }
                             ) { innerPadding ->
                                 Box(modifier = Modifier.fillMaxSize()) {
-                                    when (selectedTab) {
-                                        0 -> Box(Modifier.padding(innerPadding)) {
-                                            HomeScreen(
-                                                viewModel = homeViewModel,
-                                                dao = dao,
-                                                onConsultClick = { tx ->
-                                                    consultingTransaction = tx
-                                                    selectedTab = 3
-                                                },
-                                                onAiAdviceClick = { advice ->
-                                                    initialHomeAdviceText = advice
-                                                    selectedTab = 3
-                                                },
-                                                onNavigateToSettings = { selectedTab = 4 },
-                                                onCategoryClick = { category ->
-                                                    initialAssetCategoryFilter = category
-                                                    selectedTab = 2
-                                                }
-                                            )
-                                        }
-                                        1 -> Box(Modifier.padding(innerPadding)) {
-                                            InputScreen(
-                                                dao = dao, gemini = gemini, ocrManager = ocrManager,
-                                                initialRecovery = recoveryLending,
-                                                onRecoveryHandled = { recoveryLending = null },
-                                                onExternalActivityLaunch = { isExternalActivityLaunching = true }
-                                            )
-                                        }
-                                        2 -> Box(Modifier.padding(innerPadding)) {
-                                            AssetsScreen(
-                                                dao = dao,
-                                                onRecoverClick = { lending ->
-                                                    recoveryLending = lending
-                                                    selectedTab = 1
-                                                },
-                                                initialCategoryFilter = initialAssetCategoryFilter
-                                            )
-                                        }
-                                        3 -> {
-                                            ConsultationScreen(
-                                                dao = dao, gemini = gemini,
-                                                assets = homeViewModel.uiState.collectAsState().value.assets,
-                                                lendings = homeViewModel.uiState.collectAsState().value.lendings,
-                                                transactions = homeViewModel.uiState.collectAsState().value.transactions,
-                                                chatSessions = mainUiState.chatSessions,
-                                                drawerState = drawerState,
-                                                currentSessionId = currentChatSessionId,
-                                                onSessionSelected = { currentChatSessionId = it },
-                                                initialTransaction = consultingTransaction,
-                                                onClearConsultation = { consultingTransaction = null },
-                                                initialHomeAdviceText = initialHomeAdviceText,
-                                                onClearHomeAdvice = { initialHomeAdviceText = null },
-                                                modifier = Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding)
-                                            )
-                                        }
-                                        4 -> Box(Modifier.padding(innerPadding)) {
-                                            GeneralSettingsScreen(
-                                                appLockEnabled = appSettings?.isAppLockEnabled == true,
-                                                onToggleAppLock = { enabled ->
-                                                    appLockDialogMode = if (enabled) "set" else "disable"
-                                                    showAppLockPasswordDialog = true
-                                                },
-                                                biometricEnabled = appSettings?.isBiometricEnabled == true,
-                                                onToggleBiometric = { enabled ->
-                                                    scope.launch {
-                                                        val current = appSettings ?: AppSettingsEntity()
-                                                        dao.upsertAppSettings(current.copy(isBiometricEnabled = enabled))
-                                                    }
-                                                },
-                                                isBiometricAvailable = isBiometricAvailable(),
-                                                onChangePassword = {
-                                                    appLockDialogMode = "change"
-                                                    showAppLockPasswordDialog = true
-                                                },
-                                                onExportClick = {
-                                                    backupMode = "export"
-                                                    showBackupPasswordDialog = true
-                                                },
-                                                onImportClick = { importLauncher.launch(arrayOf("*/*")) },
-                                                onCategoryManagementClick = { selectedTab = 5 },
-                                                onRecurringManagementClick = { selectedTab = 6 },
-                                                onBack = { selectedTab = 0 }
-                                            )
-                                        }
-                                        5 -> Box(Modifier.padding(innerPadding)) {
-                                            CategoryManagementScreen(dao = dao, onBack = { selectedTab = 4 })
-                                        }
-                                        6 -> Box(Modifier.padding(innerPadding)) {
-                                            RecurringTransactionManagementScreen(dao = dao, onBack = { selectedTab = 4 })
+                                    AnimatedContent(
+                                        targetState = selectedTab,
+                                        transitionSpec = {
+                                            if (targetState > initialState) {
+                                                (slideInHorizontally { it } + fadeIn()).togetherWith(slideOutHorizontally { -it } + fadeOut())
+                                            } else {
+                                                (slideInHorizontally { -it } + fadeIn()).togetherWith(slideOutHorizontally { it } + fadeOut())
+                                            }.using(SizeTransform(clip = false))
+                                        },
+                                        label = "MainTabTransition"
+                                    ) { targetTab ->
+                                        when (targetTab) {
+                                            0 -> Box(Modifier.padding(innerPadding)) {
+                                                HomeScreen(
+                                                    viewModel = homeViewModel,
+                                                    dao = dao,
+                                                    onConsultClick = { tx ->
+                                                        consultingTransaction = tx
+                                                        selectedTab = 3
+                                                    },
+                                                    onAiAdviceClick = { advice ->
+                                                        initialHomeAdviceText = advice
+                                                        selectedTab = 3
+                                                    },
+                                                    onNavigateToSettings = { selectedTab = 4 },
+                                                    onCategoryClick = { category ->
+                                                        initialAssetCategoryFilter = category
+                                                        selectedTab = 2
+                                                    },
+                                                    onGoalClick = { selectedTab = 7 }
+                                                )
+                                            }
+                                            1 -> Box(Modifier.padding(innerPadding)) {
+                                                InputScreen(
+                                                    dao = dao, gemini = gemini, ocrManager = ocrManager,
+                                                    initialRecovery = recoveryLending,
+                                                    onRecoveryHandled = { recoveryLending = null },
+                                                    onExternalActivityLaunch = { isExternalActivityLaunching = true }
+                                                )
+                                            }
+                                            2 -> Box(Modifier.padding(innerPadding)) {
+                                                AssetsScreen(
+                                                    dao = dao,
+                                                    onRecoverClick = { lending ->
+                                                        recoveryLending = lending
+                                                        selectedTab = 1
+                                                    },
+                                                    initialCategoryFilter = initialAssetCategoryFilter
+                                                )
+                                            }
+                                            3 -> {
+                                                ConsultationScreen(
+                                                    dao = dao, gemini = gemini,
+                                                    assets = homeViewModel.uiState.collectAsState().value.assets,
+                                                    lendings = homeViewModel.uiState.collectAsState().value.lendings,
+                                                    transactions = homeViewModel.uiState.collectAsState().value.transactions,
+                                                    chatSessions = mainUiState.chatSessions,
+                                                    drawerState = drawerState,
+                                                    currentSessionId = currentChatSessionId,
+                                                    onSessionSelected = { currentChatSessionId = it },
+                                                    initialTransaction = consultingTransaction,
+                                                    onClearConsultation = { consultingTransaction = null },
+                                                    initialHomeAdviceText = initialHomeAdviceText,
+                                                    onClearHomeAdvice = { initialHomeAdviceText = null },
+                                                    modifier = Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding)
+                                                )
+                                            }
+                                            4 -> Box(Modifier.padding(innerPadding)) {
+                                                GeneralSettingsScreen(
+                                                    appLockEnabled = appSettings?.isAppLockEnabled == true,
+                                                    onToggleAppLock = { enabled ->
+                                                        appLockDialogMode = if (enabled) "set" else "disable"
+                                                        showAppLockPasswordDialog = true
+                                                    },
+                                                    biometricEnabled = appSettings?.isBiometricEnabled == true,
+                                                    onToggleBiometric = { enabled ->
+                                                        scope.launch {
+                                                            val current = appSettings ?: AppSettingsEntity()
+                                                            dao.upsertAppSettings(current.copy(isBiometricEnabled = enabled))
+                                                        }
+                                                    },
+                                                    isBiometricAvailable = isBiometricAvailable(),
+                                                    onChangePassword = {
+                                                        appLockDialogMode = "change"
+                                                        showAppLockPasswordDialog = true
+                                                    },
+                                                    onExportClick = {
+                                                        backupMode = "export"
+                                                        showBackupPasswordDialog = true
+                                                    },
+                                                    onImportClick = { importLauncher.launch(arrayOf("*/*")) },
+                                                    onCategoryManagementClick = { selectedTab = 5 },
+                                                    onRecurringManagementClick = { selectedTab = 6 },
+                                                    onBack = { selectedTab = 0 }
+                                                )
+                                            }
+                                            5 -> Box(Modifier.padding(innerPadding)) {
+                                                CategoryManagementScreen(dao = dao, onBack = { selectedTab = 4 })
+                                            }
+                                            6 -> Box(Modifier.padding(innerPadding)) {
+                                                RecurringTransactionManagementScreen(dao = dao, onBack = { selectedTab = 4 })
+                                            }
+                                            7 -> Box(Modifier.padding(innerPadding)) {
+                                                GoalSettingContent(
+                                                    dao = dao,
+                                                    aiStatus = homeUiState.aiStatus,
+                                                    aiIsReady = homeUiState.isAiReady,
+                                                    aiIsGenerating = homeUiState.isAiGenerating,
+                                                    aiIsChecking = homeUiState.isAiCheckingStatus,
+                                                    goalAiText = homeUiState.goalAiText,
+                                                    onRefreshAi = { homeViewModel.triggerGoalAnalysis() },
+                                                    isKeypadVisible = isGoalKeypadVisible,
+                                                    onKeypadVisibilityChange = { isGoalKeypadVisible = it },
+                                                    onBack = { selectedTab = 0 }
+                                                )
+                                            }
                                         }
                                     }
                                 }

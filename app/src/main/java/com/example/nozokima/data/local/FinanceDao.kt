@@ -188,4 +188,17 @@ interface FinanceDao {
 
     @Query("DELETE FROM recurring_transactions")
     suspend fun deleteAllRecurringTransactions()
+
+    // 目標履歴
+    @Query("SELECT * FROM goal_histories ORDER BY endDateMillis DESC")
+    fun getAllGoalHistories(): Flow<List<GoalHistoryEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGoalHistory(history: GoalHistoryEntity)
+
+    @Delete
+    suspend fun deleteGoalHistory(history: GoalHistoryEntity)
+
+    @Query("DELETE FROM goal_histories")
+    suspend fun deleteAllGoalHistories()
 }
