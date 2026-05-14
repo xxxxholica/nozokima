@@ -57,23 +57,11 @@ fun HomeScreen(
     val greeting = remember {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         when (hour) {
-            in 5..10 -> listOf(
-                "Good morning!", "おはようございます", "Bonjour", "¡Buenos días!",
-                "Guten Morgen", "좋은 ア침!", "早安", "Buongiorno", "Bom dia", "God morgon"
-            )
-            in 11..16 -> listOf(
-                "Hello!", "こんにちは", "Salut!", "¡Hola!", "Ciao!",
-                "你好", "Hallo!", "안녕하세요", "Hi there!", "Hi!"
-            )
-            in 17..20 -> listOf(
-                "Good evening", "こんばんは", "Bonsoir", "¡Buenas tardes!", "Buonasera",
-                "Guten Abend", "晚上好", "저녁이에요", "Boa tarde", "Relax time"
-            )
-            else -> listOf(
-                "Good night", "おやすみなさい", "Bonne nuit", "¡Buenas noches!", "Buonanotte",
-                "Gute Nacht", "晚安", "안녕히 주무세요", "Sweet dreams", "Night"
-            )
-        }.random()
+            in 5..10 -> "おはようございます"
+            in 11..16 -> "こんにちは"
+            in 17..20 -> "こんばんは"
+            else -> "おやすみなさい"
+        }
     }
 
     // 初回生成の自動トリガー
