@@ -124,15 +124,20 @@ fun ConsultationScreen(
                 "${if (it.isUser) "ユーザー" else "AI"}: ${it.text}"
             }
             val prompt = """
-                あなたは実用的でウィットに富んだ家計の相棒です。
+                あなたは実用的で実利的な家計の相棒です。
                 これまでのユーザーとの会話や現在の資産状況を踏まえて、ユーザーが次に聞きそうな「具体的なデータ確認」や「現実的な相談」の質問を3つ提案してください。
                 
                 $assetContext
                 
                 $historyContext
                 
-                自己紹介、挨拶、タメ口、および自身の性格や回答方針への言及は禁止です。
-                丁寧な言葉遣い（です・ます調）で、ウィットのある20文字以内の質問を1行に1つ記述してください。
+                【出力ルール】
+                ・質問文のみを1行に1つ、合計3行で出力してください。
+                ・「1.」「2.」といった数字や記号、箇条書きのマークは一切含めないでください。
+                ・丁寧な言葉遣い（です・ます調）で、文脈を汲み取った自然な日本語の質問にしてください。
+                ・質問は20文字以内で、答えやすい内容にしてください。
+                
+                自己紹介、挨拶、タメ口、自身の回答方針への言及は禁止です。
             """.trimIndent()
             
             try {
@@ -168,6 +173,7 @@ fun ConsultationScreen(
                 
                 onSessionSelected(sessionId)
                 onClearConsultation()
+                suggestedQuestions = emptyList()
 
                 // AI応答の生成
                 if (gemini != null && isReady) {
@@ -191,18 +197,18 @@ fun ConsultationScreen(
                     } else ""
 
                     val fullPrompt = """
-                        あなたは実用的でユーモアのある家計の相棒です。
-                        ユーザーが特定の支出について相談を始めました。
+                        あなたは家計の専門家です。
+                        ユーザーの特定の支出について、データに基づいた鋭い分析を直接伝えてください。
                         
                         $assetContext
                         $recentTxContext
                         ユーザーの相談: $userMsg
                         
-                        【禁止事項】
-                        ・自己紹介、挨拶、タメ口、精神論
-                        ・「ユーモアを交えて」「ウィットを効かせて」といった、自身のメタ的な設定や指示への言及
-                        
-                        丁寧な言葉遣い（です・ます調）を守り、データに基づいた鋭くもクスッと笑える分析を「直接」始めてください。
+                        【回答ルール】
+                        ・「深掘りする問いかけ：」「問いかけ：」などの見出しやラベルは絶対に書かないでください。
+                        ・自己紹介、挨拶、タメ口、精神論は不要です。
+                        ・丁寧な言葉遣い（です・ます調）で回答してください。
+                        ・回答の最後に、自然な会話の流れで一つだけ、ユーザーが答えやすい質問を添えてください。
                     """.trimIndent()
 
                     val aiMsgId = UUID.randomUUID().toString()
@@ -242,8 +248,9 @@ fun ConsultationScreen(
                 
                 onSessionSelected(sessionId)
                 onClearHomeAdvice()
+                suggestedQuestions = emptyList()
 
-                // AI応答の生成
+                // AI応答의 生成
                 if (gemini != null && isReady) {
                     val assetContext = buildString {
                         if (assets.isNotEmpty()) {
@@ -265,14 +272,18 @@ fun ConsultationScreen(
                     } else ""
 
                     val fullPrompt = """
-                        あなたは丁寧かつユーモラスな家計の相棒です。
-                        ユーザーがホーム画面でのあなたのアドバイスについて深掘りした質問をしました。
+                        あなたは家計の専門家です。
+                        ホーム画面でのアドバイスについて、具体的な根拠やアクションを実利的な視点で解説してください。
                         
                         $assetContext
                         $recentTxContext
                         ユーザーの相談: $userMsg
                         
-                        自己紹介、タメ口、自身の性格設定への言及は不要です。丁寧な言葉遣い（です・ます調）で、データの根拠や具体的なアクションを、ウィットを交えて実利的な視点で解説してください。
+                        【回答ルール】
+                        ・「深掘りする問いかけ：」「問いかけ：」などの見出しやラベルは絶対に書かないでください。
+                        ・自己紹介、タメ口、自身の性格設定への言及は不要です。
+                        ・丁寧な言葉遣い（です・ます調）で、端的に回答してください。
+                        ・回答の最後に、より理解を深めるための自然な質問を一文添えてください。
                     """.trimIndent()
 
                     val aiMsgId = UUID.randomUUID().toString()
@@ -447,19 +458,14 @@ fun ConsultationScreen(
                                                 } else ""
                                                 
                                                 val fullPrompt = """
-                                                    あなたは丁寧でウィットに富んだ家計の相棒です。
-                                                    資産状況と支出履歴をもとに、現状の課題や改善の余地を、です・ます調でユーモラスに指摘してください。
+                                                    あなたは家計の専門家です。現状を分析し、150文字以内で回答してください。
                                                     
-                                                    【出力ルール】
-                                                    ・150文字程度で簡潔にまとめてください。
-                                                    ・質問の範囲が広い場合はまず全体像を要約し、最も重要な1〜2点に絞って伝えてください。
-                                                    ・最後に必ず「〇〇についてもっと詳しく聞きたいですか？」といった深掘りのための問いかけを1つ添えてください。
-                                                    
-                                                    【禁止事項】
-                                                    ・自己紹介、精神論、タメ口
-                                                    ・「ユーモアを持って」「皮肉を交えて」といった、自身の振る舞い方に関するメタな言及
-                                                    
-                                                    数字や傾向に基づく現実的な話を直接伝えてください。
+                                                    【回答ルール】
+                                                    ・「深掘りする問いかけ：」「問いかけ：」などの見出しやラベル、記号は一切含めないでください。
+                                                    ・質問の範囲が指定されていない場合は、まず全体的な概要を回答してください。
+                                                    ・自己紹介、精神論、タメ口は禁止です。
+                                                    ・丁寧な言葉遣い（です・ます調）で、数字に基づく話をしてください。
+                                                    ・回答の最後に、自然な会話の流れでユーザーへの質問を一つ添えてください。
                                                     
                                                     $assetContext
                                                     $recentTxContext
@@ -481,7 +487,7 @@ fun ConsultationScreen(
                                     },
                                     label = { Text(question, fontSize = 13.sp, textAlign = TextAlign.Center) },
                                     colors = SuggestionChipDefaults.suggestionChipColors(
-                                        containerColor = NotionSafeGreen.copy(alpha = 0.05f),
+                                        containerColor = Color.Transparent,
                                         labelColor = NotionSafeGreen
                                     ),
                                     border = SuggestionChipDefaults.suggestionChipBorder(
@@ -551,16 +557,13 @@ fun ConsultationScreen(
                                     } else ""
                                     
                                     val fullPrompt = """
-                                        あなたは丁寧かつユーモラスな家計の相棒です。
-                                        資産状況と支出履歴をもとに、現実的なアドバイスをしてください。
+                                        あなたは家計の専門家です。資産状況と支出履歴をもとに、150文字以内でアドバイスしてください。
                                         
-                                        【出力ルール】
-                                        ・150文字程度で簡潔にまとめてください。
-                                        ・質問の範囲が広い場合はまず全体像を要約し、重要な点に絞って伝えてください。
-                                        ・最後に必ず、詳細を聞き出すための問いかけを1つ添えてください。
-                                        
-                                        自己紹介、精神論、タメ口、および「ウィットを効かせます」といった指示内容への言及は禁止です。
-                                        丁寧な言葉遣い（です・ます調）で、データの裏にある事実を突くような回答を「直接」お願いします。
+                                        【回答ルール】
+                                        ・「深掘りする問いかけ：」「問いかけ：」などの見出しやラベルは絶対に書かないでください。
+                                        ・自己紹介、精神論、タメ口は禁止です。
+                                        ・丁寧な言葉遣い（です・ます調）で、事実を端的に伝えてください。
+                                        ・回答の最後に、自然な流れでユーザーへの問いかけを一つ添えてください。
                                         
                                         $assetContext
                                         $recentTxContext
@@ -582,7 +585,7 @@ fun ConsultationScreen(
                         },
                         label = { Text(question, fontSize = 12.sp) },
                         colors = SuggestionChipDefaults.suggestionChipColors(
-                            containerColor = NotionSafeGreen.copy(alpha = 0.05f),
+                            containerColor = Color.Transparent,
                             labelColor = NotionSafeGreen
                         ),
                         border = SuggestionChipDefaults.suggestionChipBorder(
@@ -676,16 +679,13 @@ fun ConsultationScreen(
                                         } + "\n\n"
 
                                         val fullPrompt = """
-                                            あなたは丁寧でウィットに富んだ家計の相棒です。
-                                            資産状況、支出履歴、これまでの会話をもとに、実利的なアドバイスをしてください。
+                                            あなたは家計の専門家です。150文字以内で端的に回答してください。
                                             
-                                            【出力ルール】
-                                            ・150文字程度で端的に伝えてください。
-                                            ・全体を要約した上で、重要なポイントを絞って指摘してください。
-                                            ・最後に必ず、深掘りするための問いかけを1つ添えてください。
-                                            
-                                            自己紹介、精神論、タメ口、および自身の回答方針（ユーモア等）への言及は禁止です。
-                                            丁寧な言葉遣い（です・ます調）で、現状の数字から言えることを端的に伝えてください。
+                                            【回答ルール】
+                                            ・「深掘りする問いかけ：」「問いかけ：」などのラベル表示は厳禁です。
+                                            ・自己紹介、精神論、タメ口は禁止です。
+                                            ・丁寧な言葉遣い（です・ます調）で、数字から言えることを伝えてください。
+                                            ・回答の最後に、文脈を汲み取った自然な聞き方で、ユーザーへの質問を一つ添えてください。
                                             
                                             $assetContext
                                             $recentTxContext

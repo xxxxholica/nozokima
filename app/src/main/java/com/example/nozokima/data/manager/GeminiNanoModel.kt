@@ -111,7 +111,12 @@ class GeminiNanoModel(private val context: Context) {
             response.candidates.firstOrNull()?.text ?: "応答が空でした。"
         } catch (e: Exception) {
             Log.e("GeminiNanoModel", "Generation error", e)
-            "エラーが発生しました: ${e.message}"
+            val msg = e.message ?: ""
+            if (msg.contains("context", ignoreCase = true) || msg.contains("token", ignoreCase = true)) {
+                "分析を完了できませんでした。"
+            } else {
+                "エラーが発生しました: $msg"
+            }
         } finally {
             _isGenerating.value = false
         }
@@ -132,16 +137,10 @@ class GeminiNanoModel(private val context: Context) {
         }
 
         var lastText = ""
-        var wasInterruptedByTokenLimit = false
         try {
             generativeModel.generateContentStream(request).collect { response ->
                 val candidate = response.candidates.firstOrNull()
                 val currentText = candidate?.text ?: ""
-                
-                // トークン上限に達したかチェック
-                if (candidate?.finishReason == Candidate.FinishReason.MAX_TOKENS) {
-                    wasInterruptedByTokenLimit = true
-                }
                 
                 // APIが累積テキストを返す場合と差分を返す場合の両方に対応するため、
                 // 前回のテキストとの比較を行い、増分（delta）のみを送信する。
@@ -156,14 +155,12 @@ class GeminiNanoModel(private val context: Context) {
                 }
                 lastText = currentText
             }
-            
-            // トークン制限で中断された場合にメッセージを追記
-            if (wasInterruptedByTokenLimit) {
-                emit("\n\n(※回答が長くなったため、途中で制限されました。)")
-            }
         } catch (e: Exception) {
             Log.e("GeminiNanoModel", "Streaming generation error", e)
-            emit("エラーが発生しました: ${e.message}")
+            val msg = e.message ?: ""
+            if (!msg.contains("context", ignoreCase = true) && !msg.contains("token", ignoreCase = true)) {
+                emit("エラーが発生しました: $msg")
+            }
         }
     }.onStart {
         _isGenerating.value = true

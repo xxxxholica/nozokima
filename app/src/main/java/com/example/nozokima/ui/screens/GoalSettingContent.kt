@@ -901,7 +901,7 @@ fun AiAdvisorCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 240.dp)
+            .heightIn(min = 180.dp)
             .background(Color(0xFFF5F5F5), RoundedCornerShape(16.dp))
             .padding(16.dp),
         contentAlignment = if (isAiWaiting) Alignment.Center else Alignment.TopStart

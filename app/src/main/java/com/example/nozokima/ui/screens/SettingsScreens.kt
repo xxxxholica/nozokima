@@ -401,11 +401,9 @@ fun CategoryEditScreen(
 
     val iconOptions = listOf(
         "ShoppingCart", "Restaurant", "LocalMall", "Checkroom", "LocalCafe",
-        "DirectionsCar", "DirectionsBus", "Flight", "Home", "Wifi",
-        "PhoneIphone", "School", "Build", "FitnessCenter", "MedicalServices",
-        "Payments", "Savings", "CardGiftcard", "Celebration", "TheaterComedy",
-        "Movie", "Pets", "Brush", "Code", "Place", "Favorite", "Star",
-        "Face", "Info", "AccountBalance", "MoreHoriz"
+        "DirectionsCar", "Flight", "Home", "School", "Build", "FitnessCenter", 
+        "MedicalServices", "Payments", "Savings", "CardGiftcard", "Celebration", 
+        "Code", "Place", "Favorite", "Star", "Face", "Info", "AccountBalance", "MoreHoriz"
     )
 
     Column(
@@ -437,38 +435,6 @@ fun CategoryEditScreen(
                 .verticalScroll(rememberScrollState())
         ) {
             Spacer(Modifier.height(24.dp))
-
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = Color.White,
-                border = BorderStroke(1.dp, NotionBorder)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("カテゴリの名称", fontSize = 12.sp, color = NotionTextSecondary)
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = nameText,
-                        onValueChange = { nameText = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            color = NotionTextPrimary,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
-                        ),
-                        decorationBox = { inner ->
-                            if (nameText.isEmpty()) Text(
-                                "例: 趣味",
-                                color = NotionTextSecondary.copy(alpha = 0.5f),
-                                fontSize = 16.sp
-                            )
-                            inner()
-                        }
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -508,6 +474,38 @@ fun CategoryEditScreen(
                         selected = selectedType == "INCOME"
                     )
                 )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = Color.White,
+                border = BorderStroke(1.dp, NotionBorder)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("カテゴリの名称", fontSize = 12.sp, color = NotionTextSecondary)
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = nameText,
+                        onValueChange = { nameText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            color = NotionTextPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        decorationBox = { inner ->
+                            if (nameText.isEmpty()) Text(
+                                "趣味",
+                                color = NotionTextSecondary.copy(alpha = 0.5f),
+                                fontSize = 16.sp
+                            )
+                            inner()
+                        }
+                    )
+                }
             }
 
             Spacer(Modifier.height(32.dp))

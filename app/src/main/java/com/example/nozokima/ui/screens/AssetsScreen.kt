@@ -672,7 +672,7 @@ fun AssetsScreen(
                                 singleLine = true,
                                 textStyle = androidx.compose.ui.text.TextStyle(color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
                                 decorationBox = { inner ->
-                                    if (editNameText.isEmpty()) Text("例: 楽天銀行", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
+                                    if (editNameText.isEmpty()) Text("〇〇銀行", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
                                     inner()
                                 }
                             )
