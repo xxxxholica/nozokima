@@ -29,7 +29,7 @@ fun FloatingNavBar(
     onTabSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val items = listOf("ホーム", "記録", "資産状況", "AI相談", "設定")
+    val items = listOf("ホーム", "記録", "資産", "AI", "設定")
     val selectedIcons = listOf(
         Icons.Filled.Home,
         Icons.Filled.AddCircle,
@@ -72,41 +72,39 @@ fun FloatingNavBar(
                 )
                 .background(NotionWhite, RoundedCornerShape(12.dp))
                 .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
-                .padding(horizontal = 4.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+                .padding(vertical = 6.dp, horizontal = 8.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
             items.forEachIndexed { index, label ->
-                val isSelected = selectedTab == index
-                
-                // 設定(index 4)の前に縦線を入れる
                 if (index == 4) {
                     Box(
                         modifier = Modifier
-                            .height(24.dp)
+                            .height(20.dp)
                             .width(1.dp)
                             .background(NotionBorder)
                     )
                 }
+
+                val isSelected = selectedTab == index
 
                 Box(
                     modifier = Modifier
                         .padding(vertical = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    // アイコン＋ラベルをまとめてピルで囲む（選択範囲と強調範囲を一致させる）
+                    // アイコンを囲む枠（正方形）
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(8.dp))
                             .background(
-                                color = if (isSelected) Color(0xFFD6F0EB) else Color.Transparent,
-                                shape = RoundedCornerShape(12.dp)
+                                color = if (isSelected) Color(0xFFD6F0EB) else Color.Transparent
                             )
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
-                            ) { onTabSelected(index) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            ) { onTabSelected(index) },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(

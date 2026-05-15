@@ -170,25 +170,6 @@ interface FinanceDao {
     @Query("DELETE FROM categories")
     suspend fun deleteAllCategories()
 
-    // 固定費関連
-    @Query("SELECT * FROM recurring_transactions")
-    fun getAllRecurringTransactions(): Flow<List<RecurringTransactionEntity>>
-
-    @Query("SELECT * FROM recurring_transactions")
-    suspend fun getAllRecurringTransactionsListSync(): List<RecurringTransactionEntity>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertRecurringTransaction(recurring: RecurringTransactionEntity)
-
-    @Update
-    suspend fun updateRecurringTransaction(recurring: RecurringTransactionEntity)
-
-    @Delete
-    suspend fun deleteRecurringTransaction(recurring: RecurringTransactionEntity)
-
-    @Query("DELETE FROM recurring_transactions")
-    suspend fun deleteAllRecurringTransactions()
-
     // 目標履歴
     @Query("SELECT * FROM goal_histories ORDER BY endDateMillis DESC")
     fun getAllGoalHistories(): Flow<List<GoalHistoryEntity>>
@@ -201,4 +182,23 @@ interface FinanceDao {
 
     @Query("DELETE FROM goal_histories")
     suspend fun deleteAllGoalHistories()
+
+    // 予定支出関連
+    @Query("SELECT * FROM scheduled_expenses ORDER BY date ASC")
+    fun getAllScheduledExpenses(): Flow<List<ScheduledExpenseEntity>>
+
+    @Query("SELECT * FROM scheduled_expenses ORDER BY date ASC")
+    suspend fun getAllScheduledExpensesList(): List<ScheduledExpenseEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertScheduledExpense(expense: ScheduledExpenseEntity)
+
+    @Update
+    suspend fun updateScheduledExpense(expense: ScheduledExpenseEntity)
+
+    @Delete
+    suspend fun deleteScheduledExpense(expense: ScheduledExpenseEntity)
+
+    @Query("DELETE FROM scheduled_expenses")
+    suspend fun deleteAllScheduledExpenses()
 }

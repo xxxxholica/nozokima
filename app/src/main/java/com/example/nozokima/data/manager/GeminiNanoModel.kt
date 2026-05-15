@@ -6,7 +6,9 @@ import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.prompt.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,6 +41,9 @@ class GeminiNanoModel(private val context: Context) {
     private val _isCheckingStatus = MutableStateFlow(false)
     val isCheckingStatus: StateFlow<Boolean> = _isCheckingStatus.asStateFlow()
 
+    private val _isInitialized = MutableStateFlow(false)
+    val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
+
     private var totalBytesToDownload: Long = 1L // 0除算防止
 
     suspend fun checkModelStatus() {
@@ -47,6 +52,7 @@ class GeminiNanoModel(private val context: Context) {
             val currentStatus = generativeModel.checkStatus()
             _status.value = currentStatus
             _isReady.value = currentStatus == FeatureStatus.AVAILABLE
+            _isInitialized.value = true
             Log.d("GeminiNanoModel", "Model status: $currentStatus")
         } catch (e: Exception) {
             Log.e("GeminiNanoModel", "Error checking status", e)
@@ -111,27 +117,53 @@ class GeminiNanoModel(private val context: Context) {
         }
     }
 
-    fun generateResponseStream(prompt: String): Flow<String> = callbackFlow {
+    fun generateResponseStream(prompt: String): Flow<String> = flow {
         if (!_isReady.value) {
             checkModelStatus()
             if (!_isReady.value) {
-                trySend("AIの準備が完了するまでお待ちください。")
-                close()
-                return@callbackFlow
+                emit("AIの準備が完了するまでお待ちください。")
+                return@flow
             }
         }
 
-        val request = generateContentRequest(TextPart(prompt)) { }
-        
+        // 出力上限を拡張（APIの最大許容値である 256 に設定）
+        val request = generateContentRequest(TextPart(prompt)) {
+            maxOutputTokens = 256
+        }
+
+        var lastText = ""
+        var wasInterruptedByTokenLimit = false
         try {
-            generativeModel.generateContent(request) { newText: String ->
-                trySend(newText)
+            generativeModel.generateContentStream(request).collect { response ->
+                val candidate = response.candidates.firstOrNull()
+                val currentText = candidate?.text ?: ""
+                
+                // トークン上限に達したかチェック
+                if (candidate?.finishReason == Candidate.FinishReason.MAX_TOKENS) {
+                    wasInterruptedByTokenLimit = true
+                }
+                
+                // APIが累積テキストを返す場合と差分を返す場合の両方に対応するため、
+                // 前回のテキストとの比較を行い、増分（delta）のみを送信する。
+                val delta = if (currentText.startsWith(lastText)) {
+                    currentText.substring(lastText.length)
+                } else {
+                    currentText
+                }
+                
+                if (delta.isNotEmpty()) {
+                    emit(delta)
+                }
+                lastText = currentText
             }
-            close()
+            
+            // トークン制限で中断された場合にメッセージを追記
+            if (wasInterruptedByTokenLimit) {
+                emit("\n\n(※回答が長くなったため、途中で制限されました。)")
+            }
         } catch (e: Exception) {
             Log.e("GeminiNanoModel", "Streaming generation error", e)
-            trySend("エラーが発生しました: ${e.message}")
-            close(e)
+            emit("エラーが発生しました: ${e.message}")
         }
     }.onStart {
         _isGenerating.value = true

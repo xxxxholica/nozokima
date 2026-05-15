@@ -132,14 +132,14 @@ class BackupManager(private val dao: FinanceDao, private val context: Context) {
                 categoryFile.appendText(listOf(c.id, c.name, c.type, c.iconName, c.isDefault.toString(), c.order.toString()).map { escapeCsv(it) }.toCsvRow(), Charsets.UTF_8)
             }
             filesToZip.add(categoryFile)
-            
-            // Recurring Transactions
-            val recurringFile = File(tempDir, "recurring_transactions.csv")
-            recurringFile.writeText("id,name,amount,category,assetName,dayOfMonth,isExpense,lastProcessedDate\n", Charsets.UTF_8)
-            dao.getAllRecurringTransactionsListSync().forEach { r ->
-                recurringFile.appendText(listOf(r.id, r.name, r.amount.toString(), r.category, r.assetName, r.dayOfMonth.toString(), r.isExpense.toString(), r.lastProcessedDate.toString()).map { escapeCsv(it) }.toCsvRow(), Charsets.UTF_8)
+
+            // Scheduled Expenses
+            val scheduledFile = File(tempDir, "scheduled_expenses.csv")
+            scheduledFile.writeText("id,name,amount,category,date,assetName,isRecurring,repeatInterval,isCompleted\n", Charsets.UTF_8)
+            dao.getAllScheduledExpensesList().forEach { s ->
+                scheduledFile.appendText(listOf(s.id, s.name, s.amount.toString(), s.category, s.date.toString(), s.assetName, s.isRecurring.toString(), s.repeatInterval ?: "", s.isCompleted.toString()).map { escapeCsv(it) }.toCsvRow(), Charsets.UTF_8)
             }
-            filesToZip.add(recurringFile)
+            filesToZip.add(scheduledFile)
 
             // Export Info
             val infoFile = File(tempDir, "info.txt")
@@ -196,7 +196,7 @@ class BackupManager(private val dao: FinanceDao, private val context: Context) {
             dao.deleteAllChatMessages()
             dao.deleteAllGoalSettings()
             dao.deleteAllCategories()
-            dao.deleteAllRecurringTransactions()
+            dao.deleteAllScheduledExpenses()
 
             // Transactions
             File(tempDir, "transactions.csv").takeIf { it.exists() }?.let { file ->
@@ -306,19 +306,20 @@ class BackupManager(private val dao: FinanceDao, private val context: Context) {
                     ))
                 }
             }
-            
-            // Recurring Transactions
-            File(tempDir, "recurring_transactions.csv").takeIf { it.exists() }?.let { file ->
+
+            // Scheduled Expenses
+            File(tempDir, "scheduled_expenses.csv").takeIf { it.exists() }?.let { file ->
                 parseCsv(file.readText()).forEach { row ->
-                    dao.insertRecurringTransaction(RecurringTransactionEntity(
+                    dao.insertScheduledExpense(ScheduledExpenseEntity(
                         id = row["id"] ?: "",
                         name = row["name"] ?: "",
                         amount = row["amount"]?.toIntOrNull() ?: 0,
                         category = row["category"] ?: "",
+                        date = row["date"]?.toLongOrNull() ?: 0L,
                         assetName = row["assetName"] ?: "",
-                        dayOfMonth = row["dayOfMonth"]?.toIntOrNull() ?: 1,
-                        isExpense = row["isExpense"]?.toBoolean() ?: true,
-                        lastProcessedDate = row["lastProcessedDate"]?.toLongOrNull() ?: 0L
+                        isRecurring = row["isRecurring"]?.toBoolean() ?: true,
+                        repeatInterval = row["repeatInterval"],
+                        isCompleted = row["isCompleted"]?.toBoolean() ?: false
                     ))
                 }
             }

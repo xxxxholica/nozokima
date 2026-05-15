@@ -190,46 +190,6 @@ class MainActivity : FragmentActivity() {
                 mainViewModel.checkAiStatus()
             }
 
-            // 固定費のチェック
-            LaunchedEffect(Unit) {
-                scope.launch {
-                    val recurringList = dao.getAllRecurringTransactionsListSync()
-                    val now = Calendar.getInstance()
-                    val today = now.get(Calendar.DAY_OF_MONTH)
-                    val todayMillis = now.timeInMillis
-                    
-                    recurringList.forEach { recurring ->
-                        if (recurring.dayOfMonth == today) {
-                            val lastProcessed = Calendar.getInstance().apply { timeInMillis = recurring.lastProcessedDate }
-                            val isAlreadyProcessedToday = recurring.lastProcessedDate != 0L && 
-                                lastProcessed.get(Calendar.YEAR) == now.get(Calendar.YEAR) &&
-                                lastProcessed.get(Calendar.MONTH) == now.get(Calendar.MONTH) &&
-                                lastProcessed.get(Calendar.DAY_OF_MONTH) == now.get(Calendar.DAY_OF_MONTH)
-                            
-                            if (!isAlreadyProcessedToday) {
-                                val asset = dao.getAssetByName(recurring.assetName)
-                                if (asset != null) {
-                                    dao.insertTransaction(TransactionEntity(
-                                        id = UUID.randomUUID().toString(),
-                                        name = "[固定費] ${recurring.name}",
-                                        amount = recurring.amount,
-                                        category = recurring.category,
-                                        date = todayMillis,
-                                        assetName = recurring.assetName,
-                                        isExpense = recurring.isExpense
-                                    ))
-                                    dao.updateAsset(asset.copy(
-                                        amount = if (recurring.isExpense) asset.amount - recurring.amount else asset.amount + recurring.amount,
-                                        lastUpdated = todayMillis
-                                    ))
-                                    dao.updateRecurringTransaction(recurring.copy(lastProcessedDate = todayMillis))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             // デフォルトカテゴリと資産の初期化
             LaunchedEffect(Unit) {
                 scope.launch {
@@ -654,7 +614,7 @@ class MainActivity : FragmentActivity() {
                                                         initialAssetCategoryFilter = category
                                                         selectedTab = 2
                                                     },
-                                                    onGoalClick = { selectedTab = 7 }
+                                                    onGoalClick = { selectedTab = 6 }
                                                 )
                                             }
                                             1 -> Box(Modifier.padding(innerPadding)) {
@@ -717,7 +677,6 @@ class MainActivity : FragmentActivity() {
                                                     },
                                                     onImportClick = { importLauncher.launch(arrayOf("*/*")) },
                                                     onCategoryManagementClick = { selectedTab = 5 },
-                                                    onRecurringManagementClick = { selectedTab = 6 },
                                                     onBack = { selectedTab = 0 }
                                                 )
                                             }
@@ -725,15 +684,13 @@ class MainActivity : FragmentActivity() {
                                                 CategoryManagementScreen(dao = dao, onBack = { selectedTab = 4 })
                                             }
                                             6 -> Box(Modifier.padding(innerPadding)) {
-                                                RecurringTransactionManagementScreen(dao = dao, onBack = { selectedTab = 4 })
-                                            }
-                                            7 -> Box(Modifier.padding(innerPadding)) {
                                                 GoalSettingContent(
                                                     dao = dao,
                                                     aiStatus = homeUiState.aiStatus,
                                                     aiIsReady = homeUiState.isAiReady,
                                                     aiIsGenerating = homeUiState.isAiGenerating,
                                                     aiIsChecking = homeUiState.isAiCheckingStatus,
+                                                    aiIsInitialized = homeUiState.isAiInitialized,
                                                     goalAiText = homeUiState.goalAiText,
                                                     onRefreshAi = { homeViewModel.triggerGoalAnalysis() },
                                                     isKeypadVisible = isGoalKeypadVisible,

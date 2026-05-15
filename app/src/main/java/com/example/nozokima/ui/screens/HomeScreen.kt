@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.RequestPage
@@ -388,11 +389,11 @@ fun AiAnalysisSection(
     onRefreshAi: () -> Unit,
     onAiAdviceClick: (String) -> Unit
 ) {
-    val isWaitingForCheck = uiState.isAiCheckingStatus && uiState.homeAiText.isEmpty()
+    val isWaitingForCheck = (!uiState.isAiInitialized || uiState.isAiCheckingStatus) && uiState.homeAiText.isEmpty()
     val isGeneratingNow = uiState.isAiGenerating && uiState.homeAiText.isEmpty()
     val showProgress = isWaitingForCheck || isGeneratingNow
     val statusLabel = when {
-        isWaitingForCheck -> "AI を確認中..."
+        isWaitingForCheck && uiState.isAiInitialized -> "AI を確認中..."
         isGeneratingNow   -> "分析中..."
         else              -> null
     }
@@ -402,69 +403,114 @@ fun AiAnalysisSection(
             .fillMaxWidth()
             .heightIn(min = 160.dp)
             .background(Color(0xFFF5F5F5), RoundedCornerShape(10.dp))
-            .then(if (uiState.homeAiText.isNotEmpty() && !uiState.isAiGenerating) Modifier.clickable { onAiAdviceClick(uiState.homeAiText) } else Modifier)
-            .padding(12.dp)
+            .padding(12.dp),
+        contentAlignment = if (isWaitingForCheck) Alignment.Center else Alignment.TopStart
     ) {
-        Column {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                val isUnavailable = uiState.aiStatus == FeatureStatus.UNAVAILABLE
-                val themeColor = if (isUnavailable) Color(0xFFE57373) else NotionSafeGreen
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .background(themeColor.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isUnavailable) Icons.Default.Info else Icons.Default.AutoAwesome,
-                        contentDescription = "AI",
-                        tint = themeColor,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (isUnavailable) "覗き魔AI は利用できません" else "覗き魔 AI",
-                    color = themeColor,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
+        if (isWaitingForCheck) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    color = NotionSafeGreen,
+                    strokeWidth = 3.dp
                 )
-                Spacer(modifier = Modifier.weight(1f))
-                if (uiState.isAiReady && !uiState.isAiGenerating) {
-                    IconButton(onClick = onRefreshAi, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Refresh, "再生成", tint = themeColor, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("AIの状態を確認中...", color = NotionTextSecondary, fontSize = 12.sp)
+            }
+        } else {
+            val isUnavailable = uiState.aiStatus == FeatureStatus.UNAVAILABLE
+            val themeColor = if (isUnavailable) Color(0xFFE57373) else NotionSafeGreen
+            
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .background(themeColor.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isUnavailable) Icons.Default.Info else Icons.Default.AutoAwesome,
+                            contentDescription = "AI",
+                            tint = themeColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isUnavailable) "覗き魔AI は利用できません" else "覗き魔 AI",
+                        color = themeColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    if (!isUnavailable) {
+                        val isGenerating = uiState.isAiGenerating
+                        val hasText = uiState.homeAiText.isNotEmpty()
+                        
+                        // 再生成ボタン (アイコンのみ)
+                        Surface(
+                            onClick = onRefreshAi,
+                            enabled = !isGenerating,
+                            modifier = Modifier.size(28.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isGenerating) NotionBorder.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.1f),
+                            contentColor = if (isGenerating) NotionTextSecondary.copy(alpha = 0.5f) else themeColor
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        // 詳しく聞くボタン
+                        Surface(
+                            onClick = { onAiAdviceClick(uiState.homeAiText) },
+                            enabled = !isGenerating && hasText,
+                            modifier = Modifier.height(28.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isGenerating || !hasText) NotionBorder.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.1f),
+                            contentColor = if (isGenerating || !hasText) NotionTextSecondary.copy(alpha = 0.5f) else themeColor
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.Chat, null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("詳しく聞く", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            if (showProgress) {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)),
-                    color = NotionSafeGreen,
-                    trackColor = NotionSafeGreen.copy(alpha = 0.2f)
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-            }
-            if (statusLabel != null) {
-                Text(statusLabel, color = NotionTextSecondary.copy(alpha = 0.6f), fontSize = 12.sp)
-            } else if (uiState.aiStatus == FeatureStatus.UNAVAILABLE) {
-                val uriHandler = LocalUriHandler.current
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Gemini Nanoに対応したデバイスのみ利用可能です。\n対応デバイスは下記リンクをご覧ください。",
-                        color = NotionTextPrimary, fontSize = 12.sp, lineHeight = 18.sp
+                Spacer(modifier = Modifier.height(10.dp))
+                if (showProgress) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)),
+                        color = NotionSafeGreen,
+                        trackColor = NotionSafeGreen.copy(alpha = 0.2f)
                     )
-                    Text(
-                        text = "https://developers.google.com/ml-kit/genai?hl=ja",
-                        color = Color(0xFF1976D2), fontSize = 12.sp,
-                        modifier = Modifier.clickable { uriHandler.openUri("https://developers.google.com/ml-kit/genai?hl=ja") }
-                    )
+                    Spacer(modifier = Modifier.height(6.dp))
                 }
-            } else if (uiState.homeAiText.isNotEmpty()) {
-                Text(uiState.homeAiText, color = NotionTextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
+                if (statusLabel != null) {
+                    Text(statusLabel, color = NotionTextSecondary.copy(alpha = 0.6f), fontSize = 12.sp)
+                } else if (uiState.aiStatus == FeatureStatus.UNAVAILABLE) {
+                    val uriHandler = LocalUriHandler.current
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Gemini Nanoに対応したデバイスのみ利用可能です。\n対応デバイスは下記リンクをご覧ください。",
+                            color = NotionTextPrimary, fontSize = 12.sp, lineHeight = 18.sp
+                        )
+                        Text(
+                            text = "https://developers.google.com/ml-kit/genai?hl=ja",
+                            color = Color(0xFF1976D2), fontSize = 12.sp,
+                            modifier = Modifier.clickable { uriHandler.openUri("https://developers.google.com/ml-kit/genai?hl=ja") }
+                        )
+                    }
+                } else if (uiState.homeAiText.isNotEmpty()) {
+                    Text(uiState.homeAiText, color = NotionTextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
+                }
             }
         }
     }

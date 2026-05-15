@@ -25,7 +25,8 @@ data class HomeUiState(
     val isAiGenerating: Boolean = false,
     val aiStatus: Int = 0, // Using Int as per GeminiNanoModel
     val isAiReady: Boolean = false,
-    val isAiCheckingStatus: Boolean = false
+    val isAiCheckingStatus: Boolean = false,
+    val isAiInitialized: Boolean = false
 )
 
 class HomeViewModel(
@@ -47,7 +48,8 @@ class HomeViewModel(
         gemini.isGenerating,
         gemini.status,
         gemini.isReady,
-        gemini.isCheckingStatus
+        gemini.isCheckingStatus,
+        gemini.isInitialized
     ) { params ->
         val transactions = params[0] as List<TransactionEntity>
         val assets = params[1] as List<AssetEntity>
@@ -60,6 +62,7 @@ class HomeViewModel(
         val aiStatus = params[8] as Int
         val isAiReady = params[9] as Boolean
         val isAiChecking = params[10] as Boolean
+        val isAiInitialized = params[11] as Boolean
 
         HomeUiState(
             transactions = transactions,
@@ -72,7 +75,8 @@ class HomeViewModel(
             isAiGenerating = isGenerating,
             aiStatus = aiStatus,
             isAiReady = isAiReady,
-            isAiCheckingStatus = isAiChecking
+            isAiCheckingStatus = isAiChecking,
+            isAiInitialized = isAiInitialized
         )
     }.stateIn(
         scope = viewModelScope,
@@ -113,7 +117,14 @@ class HomeViewModel(
         val goalProgressRatio = if (hasGoal) (currentAssets.toFloat() / currentGoal.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
 
         val prompt = buildString {
-            appendLine("あなたは家計管理AIアシスタントです。以下の家計データをもとに日本語で100〜150字の簡潔なアドバイスを1つだけ返してください。余計な挨拶・前置きは不要です。")
+            appendLine("あなたは丁寧かつユーモアのある家計の相棒です。")
+            appendLine("以下のデータをもとに、現状の分析とアドバイスを返してください。")
+            appendLine("【出力ルール】")
+            appendLine("・120文字程度の簡潔な1〜2文でまとめてください。")
+            appendLine("・重要なポイントを1点に絞り、最後に「もっと詳しく聞きたいですか？」といった深掘りのための問いかけを添えてください。")
+            appendLine("【禁止事項】自己紹介、挨拶、タメ口、精神論、および「ユーモアを交えて回答します」といったメタ的な言及")
+            appendLine("丁寧な言葉遣い（です・ます調）を守り、数字に基づく具体的な指摘をウィットを交えて端的に「直接」伝えてください。")
+            appendLine()
             appendLine("今月の支出: ¥${String.format(Locale.JAPAN, "%,d", spentThisMonth)}")
             appendLine("月の予算: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
             appendLine("予算消化率: ${if (monthlyBudget > 0) "${(spentThisMonth.toFloat() / monthlyBudget * 100).toInt()}%" else "不明"}")
@@ -159,7 +170,14 @@ class HomeViewModel(
         val timeProgressPercent = (passedDays.toFloat() / totalGoalDays.toFloat() * 100).toInt().coerceIn(0, 100)
 
         val prompt = buildString {
-            appendLine("あなたは家計管理AIアシスタントです。ユーザーの貯金目標に対する進捗を分析し、日本語で100〜150字の簡潔なアドバイスを返してください。")
+            appendLine("あなたは実用的でウィットに富んだ家計の相棒です。")
+            appendLine("貯金目標に対する進捗を分析し、アドバイスを返してください。")
+            appendLine("【出力ルール】")
+            appendLine("・120文字程度の簡潔な1〜2文でまとめてください。")
+            appendLine("・最も重要な指摘を1点伝え、最後に深掘りのための問いかけを添えてください。")
+            appendLine("自己紹介、タメ口、精神論、および自身の回答傾向（ユーモア等）に関する説明は禁止です。")
+            appendLine("丁寧な言葉遣い（です・ます調）で、数字に裏打ちされた具体的な指摘のみを端的に伝えてください。")
+            appendLine()
             appendLine("目標: ${currentGoal.title}")
             appendLine("目標金額: ¥${String.format(Locale.JAPAN, "%,d", currentGoal.targetAmount)}")
             appendLine("現在の資産: ¥${String.format(Locale.JAPAN, "%,d", currentAssets)}（達成率${progressPercent}%）")
@@ -167,13 +185,12 @@ class HomeViewModel(
             appendLine("今後の月予算目安: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
             
             if (progressPercent < timeProgressPercent) {
-                appendLine("状況: 貯金のペースが期間経過に対して遅れています。")
+                appendLine("状況: 貯金のペースが期間経過に対して遅れ気味です。")
             } else if (progressPercent >= 100) {
-                appendLine("状況: 目標金額を達成しました！")
+                appendLine("状況: 目標金額に到達しました。")
             } else {
-                appendLine("状況: 順調なペースです。")
+                appendLine("状況: ペースは安定しています。")
             }
-            appendLine("余計な挨拶は不要です。")
         }
 
         _goalAiText.value = ""

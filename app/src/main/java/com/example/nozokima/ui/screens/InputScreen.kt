@@ -53,6 +53,7 @@ import com.example.nozokima.ui.components.InputTile
 import com.example.nozokima.ui.components.ScreenHeader
 import com.example.nozokima.ui.components.SuccessOverlay
 import com.example.nozokima.util.evaluateExpression
+import com.example.nozokima.util.formatAmountWithCommas
 import kotlinx.coroutines.launch
 import ui.theme.*
 import java.io.File
@@ -80,6 +81,7 @@ fun InputScreen(
 ) {
     val modes = listOf("支出", "収入", "振替", "貸付", "回収")
     var selectedMode by remember { mutableStateOf(if (initialRecovery != null) "回収" else "支出") }
+    var selectedPaymentType by remember { mutableStateOf("即時") }
     
     var amountText by remember { mutableStateOf(if (initialRecovery != null) (initialRecovery.amount - initialRecovery.recoveredAmount).toString() else "") }
     var memoText by remember { mutableStateOf(if (initialRecovery != null) initialRecovery.memo else "") }
@@ -119,14 +121,36 @@ fun InputScreen(
 
     val iconMap = mapOf(
         "ShoppingCart" to Icons.Default.ShoppingCart,
+        "Restaurant" to Icons.Default.Restaurant,
+        "LocalMall" to Icons.Default.LocalMall,
+        "Checkroom" to Icons.Default.Checkroom,
+        "LocalCafe" to Icons.Default.LocalCafe,
+        "DirectionsCar" to Icons.Default.DirectionsCar,
+        "DirectionsBus" to Icons.Default.DirectionsBus,
+        "Flight" to Icons.Default.Flight,
+        "Home" to Icons.Default.Home,
+        "Wifi" to Icons.Default.Wifi,
+        "PhoneIphone" to Icons.Default.PhoneIphone,
+        "School" to Icons.Default.School,
         "Build" to Icons.Default.Build,
+        "FitnessCenter" to Icons.Default.FitnessCenter,
+        "MedicalServices" to Icons.Default.MedicalServices,
+        "Payments" to Icons.Default.Payments,
+        "Savings" to Icons.Default.Savings,
+        "CardGiftcard" to Icons.Default.CardGiftcard,
+        "Celebration" to Icons.Default.Celebration,
+        "TheaterComedy" to Icons.Default.TheaterComedy,
+        "Movie" to Icons.Default.Movie,
+        "Pets" to Icons.Default.Pets,
+        "Brush" to Icons.Default.Brush,
+        "Code" to Icons.Default.Code,
         "Place" to Icons.Default.Place,
         "Favorite" to Icons.Default.Favorite,
         "Star" to Icons.Default.Star,
         "Face" to Icons.Default.Face,
         "Info" to Icons.Default.Info,
-        "MoreHoriz" to Icons.Default.MoreHoriz,
-        "AccountBalance" to Icons.Default.AccountBalance
+        "AccountBalance" to Icons.Default.AccountBalance,
+        "MoreHoriz" to Icons.Default.MoreHoriz
     )
 
     val expenseCategories = remember(customCategories) {
@@ -218,7 +242,7 @@ fun InputScreen(
                     when {
                         trimmed.startsWith("AMOUNT:") -> {
                             val value = trimmed.substringAfter("AMOUNT:").trim().filter { it.isDigit() }
-                            if (value.isNotEmpty()) amountText = value
+                            if (value.isNotEmpty()) amountText = formatAmountWithCommas(value)
                         }
                         trimmed.startsWith("DATE:") -> {
                             val dateStr = trimmed.substringAfter("DATE:").trim()
@@ -294,6 +318,7 @@ fun InputScreen(
         if (selectedMode != "回収" || selectedLending == null) {
             selectedCategory = categories.firstOrNull()
         }
+        selectedPaymentType = "即時"
     }
 
     val accentColor = when (selectedMode) {
@@ -339,19 +364,30 @@ fun InputScreen(
                 when (currentMode) {
                     "支出", "収入" -> {
                         val isExp = currentMode == "支出"
-                        dao.insertTransaction(TransactionEntity(
-                            id = UUID.randomUUID().toString(),
-                            name = currentMemo.ifBlank { currentCategory },
-                            amount = amountValue,
-                            category = currentCategory,
-                            date = selectedDate,
-                            assetName = asset.name,
-                            isExpense = isExp
-                        ))
-                        dao.updateAsset(asset.copy(
-                            amount = if (isExp) asset.amount - amountValue else asset.amount + amountValue,
-                            lastUpdated = System.currentTimeMillis()
-                        ))
+                        if (isExp && selectedPaymentType != "即時") {
+                            dao.insertScheduledExpense(ScheduledExpenseEntity(
+                                name = currentMemo.ifBlank { currentCategory },
+                                amount = amountValue,
+                                category = currentCategory,
+                                date = selectedDate,
+                                assetName = asset.name,
+                                isRecurring = selectedPaymentType == "固定費"
+                            ))
+                        } else {
+                            dao.insertTransaction(TransactionEntity(
+                                id = UUID.randomUUID().toString(),
+                                name = currentMemo.ifBlank { currentCategory },
+                                amount = amountValue,
+                                category = currentCategory,
+                                date = selectedDate,
+                                assetName = asset.name,
+                                isExpense = isExp
+                            ))
+                            dao.updateAsset(asset.copy(
+                                amount = if (isExp) asset.amount - amountValue else asset.amount + amountValue,
+                                lastUpdated = System.currentTimeMillis()
+                            ))
+                        }
                     }
                     "振替" -> {
                         if (toAsset != null) {
@@ -434,7 +470,18 @@ fun InputScreen(
                 if (gemini != null && currentMode == "支出") {
                     scope.launch {
                         try {
-                            val prompt = "私は今、$amountValue 円を「$currentCategory」に使いました（メモ：$currentMemo）。これに対する1行の短い節約アドバイスをください。挨拶は不要です。"
+                            val prompt = """
+                                ユーザーが支出を記録しました：$amountValue 円（$currentCategory）
+                                メモ：$currentMemo
+                                
+                                あなたは家計の相棒として、この支出に対する現実的でウィットに富んだ一言を1行で返してください。
+                                
+                                【禁止事項】
+                                ・「ユーモアを交えて回答します」「ウィットを効かせます」といった、自身の性格や指示内容への言及
+                                ・自己紹介、挨拶、タメ口、精神論
+                                
+                                丁寧な言葉遣い（です・ます調）を維持し、データに基づいた皮肉やユーモアのある指摘のみを「直接」出力してください。
+                            """.trimIndent()
                             val advice = gemini.generateResponse(prompt)
                             successInfo = successInfo?.copy(aiAdvice = advice)
                         } catch (e: Exception) {
@@ -463,44 +510,49 @@ fun InputScreen(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
         ) {
             ScreenHeader(title = "記録")
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // セグメントコントロール
-            Column(modifier = Modifier.padding(horizontal = 24.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().height(44.dp).horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.Start
-                ) {
-                    modes.forEach { mode ->
-                        val isSelected = selectedMode == mode
+            // セグメントコントロール (独立したブロック形式)
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = 24.dp)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                modes.forEach { mode ->
+                    val isSelected = selectedMode == mode
+                    val modeColor = when (mode) {
+                        "支出" -> Color(0xFFD32F2F)
+                        "収入" -> NotionSafeGreen
+                        "振替" -> Color(0xFF1976D2)
+                        "貸付" -> Color(0xFFFB8C00)
+                        "回収" -> Color(0xFF00897B)
+                        else -> NotionTextPrimary
+                    }
+                    
+                    Surface(
+                        onClick = { selectedMode = mode },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isSelected) modeColor.copy(alpha = 0.12f) else Color.White,
+                        border = BorderStroke(1.dp, if (isSelected) modeColor else NotionBorder)
+                    ) {
                         Box(
-                            modifier = Modifier
-                                .clickable { selectedMode = mode }
-                                .padding(horizontal = 12.dp)
-                                .fillMaxHeight(),
+                            modifier = Modifier.padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = mode,
-                                    color = if (isSelected) NotionTextPrimary else NotionTextSecondary,
-                                    fontSize = 14.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .width(20.dp)
-                                        .height(2.dp)
-                                        .background(if (isSelected) NotionTextPrimary else Color.Transparent)
-                                )
-                            }
+                            Text(
+                                text = mode,
+                                color = if (isSelected) modeColor else NotionTextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
                         }
                     }
                 }
-                HorizontalDivider(thickness = 1.dp, color = NotionBorder)
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 金額ボックス
             Box(
@@ -575,42 +627,54 @@ fun InputScreen(
             if (showOcrOptions) {
                 ModalBottomSheet(
                     onDismissRequest = { showOcrOptions = false },
-                    containerColor = Color.White
+                    containerColor = Color.White,
+                    dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
                 ) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
-                        Text("レシート読み取り", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
-                        ListItem(
-                            headlineContent = { Text("カメラで撮影") },
-                            leadingContent = { Icon(Icons.Default.CameraAlt, null, tint = NotionSafeGreen) },
-                            modifier = Modifier.clickable {
-                                showOcrOptions = false
-                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                                    onExternalActivityLaunch()
-                                    cameraLauncher.launch(tempImageUri)
-                                } else {
-                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                                }
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
+                        Text("レシート読み取り", modifier = Modifier.padding(vertical = 16.dp), color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                AssetCategoryTile(
+                                    label = "カメラで撮影",
+                                    icon = Icons.Default.CameraAlt,
+                                    color = NotionSafeGreen,
+                                    onClick = {
+                                        showOcrOptions = false
+                                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                            onExternalActivityLaunch()
+                                            cameraLauncher.launch(tempImageUri)
+                                        } else {
+                                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                        }
+                                    }
+                                )
                             }
-                        )
-                        HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
-                        ListItem(
-                            headlineContent = { Text("アルバムから選択") },
-                            leadingContent = { Icon(Icons.Default.PhotoLibrary, null, tint = NotionSafeGreen) },
-                            modifier = Modifier.clickable {
-                                showOcrOptions = false
-                                onExternalActivityLaunch()
-                                photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                AssetCategoryTile(
+                                    label = "アルバムから",
+                                    icon = Icons.Default.PhotoLibrary,
+                                    color = NotionSafeGreen,
+                                    onClick = {
+                                        showOcrOptions = false
+                                        onExternalActivityLaunch()
+                                        photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                    }
+                                )
                             }
-                        )
+                            // 3列目と4列目の調整（カテゴリーメニューの幅と合わせるため）
+                            Spacer(modifier = Modifier.weight(1f))
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Column(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                modifier = Modifier.padding(horizontal = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (selectedMode == "回収") {
                     InputTile(
@@ -627,17 +691,52 @@ fun InputScreen(
                 val isDetailEnabled = selectedMode != "回収" || selectedLending != null
                 val detailAlpha = if (isDetailEnabled) 1f else 0.5f
 
-                Text(
-                    "詳細情報",
-                    color = NotionTextPrimary.copy(alpha = detailAlpha),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 4.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "詳細情報",
+                        color = NotionTextPrimary.copy(alpha = detailAlpha),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+
+                    if (selectedMode == "支出") {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf("即時", "後払い", "固定費").forEach { type ->
+                                val isSelected = selectedPaymentType == type
+                                Surface(
+                                    onClick = { selectedPaymentType = type },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSelected) accentColor else Color.White,
+                                    border = BorderStroke(1.dp, if (isSelected) accentColor else NotionBorder),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier.padding(horizontal = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = type,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) Color.White else NotionTextSecondary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 InputTile(
                     icon = Icons.Default.CalendarMonth,
-                    label = "日付",
+                    label = "支払日",
                     value = dateFormatter.format(Date(selectedDate)),
                     onClick = { showDatePicker = true },
                     accentColor = accentColor,
@@ -729,23 +828,26 @@ fun InputScreen(
                                 Icons.Default.EditNote,
                                 contentDescription = null,
                                 tint = accentColor,
-                                modifier = Modifier.padding(8.dp)
+                                modifier = Modifier.padding(10.dp)
                             )
                         }
-                        Spacer(Modifier.width(12.dp))
-                        androidx.compose.foundation.text.BasicTextField(
-                            value = memoText,
-                            onValueChange = { memoText = it },
-                            modifier = Modifier.weight(1f),
-                            enabled = isDetailEnabled,
-                            singleLine = true,
-                            textStyle = TextStyle(fontSize = 15.sp, color = NotionTextPrimary),
-                            cursorBrush = SolidColor(accentColor),
-                            decorationBox = { inner ->
-                                if (memoText.isEmpty()) Text("メモを入力", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
-                                inner()
-                            }
-                        )
+                        Spacer(Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("メモ", fontSize = 12.sp, color = NotionTextSecondary)
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = memoText,
+                                onValueChange = { memoText = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = isDetailEnabled,
+                                singleLine = true,
+                                textStyle = TextStyle(fontSize = 15.sp, color = NotionTextPrimary, fontWeight = FontWeight.SemiBold),
+                                cursorBrush = SolidColor(accentColor),
+                                decorationBox = { inner ->
+                                    if (memoText.isEmpty()) Text("メモを入力", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
+                                    inner()
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -773,7 +875,7 @@ fun InputScreen(
             ) {
                 Text(
                     text = when(selectedMode) {
-                        "支出" -> "支出を記録する"
+                        "支出" -> if (selectedPaymentType == "即時") "支出を記録する" else "予定に追加する"
                         "収入" -> "収入を記録する"
                         "振替" -> "振替を記録する"
                         "貸付" -> "貸付を記録する"
@@ -796,19 +898,31 @@ fun InputScreen(
                 scrimColor = Color.Transparent
             ) {
                 CustomKeypad(
-                    onNumberClick = { num -> if (amountText == "0") amountText = num else amountText += num },
-                    onOperatorClick = { op -> if (amountText.isNotEmpty() && !amountText.last().toString().matches(Regex("[-+*/.]"))) amountText += op },
-                    onDeleteClick = { if (amountText.isNotEmpty()) amountText = amountText.dropLast(1) },
+                    onNumberClick = { num -> 
+                        val newAmount = if (amountText == "0") num else amountText + num
+                        amountText = formatAmountWithCommas(newAmount)
+                    },
+                    onOperatorClick = { op -> 
+                        if (amountText.isNotEmpty() && !amountText.last().toString().matches(Regex("[-+*/.]"))) {
+                            amountText += op
+                        }
+                    },
+                    onDeleteClick = { 
+                        if (amountText.isNotEmpty()) {
+                            val dropped = amountText.dropLast(1)
+                            amountText = formatAmountWithCommas(dropped)
+                        }
+                    },
                     onClearAllClick = { amountText = "" },
                     onConfirmClick = {
                         try {
-                            amountText = evaluateExpression(amountText).toString()
+                            amountText = formatAmountWithCommas(evaluateExpression(amountText).toString())
                         } catch (e: Exception) {}
                     },
                     onSaveClick = {
                         if (amountText.any { it in "+-*/" }) {
                             try {
-                                amountText = evaluateExpression(amountText).toString()
+                                amountText = formatAmountWithCommas(evaluateExpression(amountText).toString())
                             } catch (e: Exception) {}
                         } else {
                             onSave()
@@ -932,7 +1046,7 @@ fun InputScreen(
                         Row(
                             modifier = Modifier.fillMaxWidth().clickable { 
                                 selectedLending = lending
-                                amountText = (lending.amount - lending.recoveredAmount).toString()
+                                amountText = formatAmountWithCommas((lending.amount - lending.recoveredAmount).toString())
                                 memoText = lending.memo
                                 showLendingSheet = false 
                                 // 回収する貸付を選んだら、自動的に入金先資産の選択を開く

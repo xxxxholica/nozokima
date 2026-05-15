@@ -9,10 +9,11 @@ import androidx.compose.ui.unit.sp
 fun evaluateExpression(expression: String): Int {
     if (expression.isEmpty()) return 0
     return try {
-        // 全角記号の正規化と不要な記号の除去
+        // 全角記号の正規化、カンマの除去、不要な記号の除去
         val normalized = expression.replace("−", "-")
             .replace("×", "*")
             .replace("÷", "/")
+            .replace(",", "")
             .trim()
         
         // 末尾が演算子の場合は、その演算子を除去して計算する
@@ -108,6 +109,26 @@ fun parseMarkdown(text: String) = buildAnnotatedString {
             }
         } else {
             append(part)
+        }
+    }
+}
+
+fun formatAmountWithCommas(text: String): String {
+    if (text.isEmpty()) return ""
+    // 既存のカンマを一旦すべて削除して正規化
+    val cleanText = text.replace(",", "")
+    // 数字とそれ以外（演算子など）を分離
+    val regex = Regex("(?<=[-+*/])|(?=[-+*/])")
+    val tokens = cleanText.split(regex)
+    return tokens.joinToString("") { token ->
+        if (token.matches(Regex("\\d+"))) {
+            try {
+                String.format(java.util.Locale.JAPAN, "%,d", token.toLong())
+            } catch (e: Exception) {
+                token
+            }
+        } else {
+            token
         }
     }
 }

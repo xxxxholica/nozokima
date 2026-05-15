@@ -99,7 +99,11 @@ fun ConsultationScreen(
     val errorMsg by (gemini?.errorMessage?.collectAsState() ?: remember { mutableStateOf<String?>(null) })
     val isGenerating by (gemini?.isGenerating?.collectAsState() ?: remember { mutableStateOf(false) })
     val aiStatus by (gemini?.status?.collectAsState() ?: remember { mutableStateOf(FeatureStatus.UNAVAILABLE) })
+    val isInitialized by (gemini?.isInitialized?.collectAsState() ?: remember { mutableStateOf(false) })
+    val isChecking by (gemini?.isCheckingStatus?.collectAsState() ?: remember { mutableStateOf(false) })
     val isAvailable = aiStatus != FeatureStatus.UNAVAILABLE
+
+    val showLoading = !isInitialized || isChecking
 
     // --- サジェスト生成ロジック ---
     fun generateSuggestions(currentMessages: List<ChatMessageEntity>) {
@@ -120,17 +124,15 @@ fun ConsultationScreen(
                 "${if (it.isUser) "ユーザー" else "AI"}: ${it.text}"
             }
             val prompt = """
-                あなたは家計管理AIアシスタント「覗き魔AI」です。
-                これまでのユーザーとの会話や現在の資産状況を踏まえて、ユーザーが次に聞きそうな質問を3つ、日本語で20文字以内の短い文章で提案してください。
+                あなたは実用的でウィットに富んだ家計の相棒です。
+                これまでのユーザーとの会話や現在の資産状況を踏まえて、ユーザーが次に聞きそうな「具体的なデータ確認」や「現実的な相談」の質問を3つ提案してください。
                 
                 $assetContext
                 
                 $historyContext
                 
-                出力形式は必ず以下のように、1行に1つの質問のみを記述してください。余計な説明や挨拶は不要です。
-                質問1
-                質問2
-                質問3
+                自己紹介、挨拶、タメ口、および自身の性格や回答方針への言及は禁止です。
+                丁寧な言葉遣い（です・ます調）で、ウィットのある20文字以内の質問を1行に1つ記述してください。
             """.trimIndent()
             
             try {
@@ -189,14 +191,18 @@ fun ConsultationScreen(
                     } else ""
 
                     val fullPrompt = """
-                        あなたは家計管理AIアシスタント「覗き魔AI」です。
+                        あなたは実用的でユーモアのある家計の相棒です。
                         ユーザーが特定の支出について相談を始めました。
                         
                         $assetContext
                         $recentTxContext
                         ユーザーの相談: $userMsg
                         
-                        この支出について、家計の状況を考慮しつつ、共感したり、時には厳しく指摘したりして、短い対話を始めてください。
+                        【禁止事項】
+                        ・自己紹介、挨拶、タメ口、精神論
+                        ・「ユーモアを交えて」「ウィットを効かせて」といった、自身のメタ的な設定や指示への言及
+                        
+                        丁寧な言葉遣い（です・ます調）を守り、データに基づいた鋭くもクスッと笑える分析を「直接」始めてください。
                     """.trimIndent()
 
                     val aiMsgId = UUID.randomUUID().toString()
@@ -259,14 +265,14 @@ fun ConsultationScreen(
                     } else ""
 
                     val fullPrompt = """
-                        あなたは家計管理AIアシスタント「覗き魔AI」です。
+                        あなたは丁寧かつユーモラスな家計の相棒です。
                         ユーザーがホーム画面でのあなたのアドバイスについて深掘りした質問をしました。
                         
                         $assetContext
                         $recentTxContext
                         ユーザーの相談: $userMsg
                         
-                        提示したアドバイスの意図や、具体的なアクションプラン、注意点などを日本語で親身に解説してください。
+                        自己紹介、タメ口、自身の性格設定への言及は不要です。丁寧な言葉遣い（です・ます調）で、データの根拠や具体的なアクションを、ウィットを交えて実利的な視点で解説してください。
                     """.trimIndent()
 
                     val aiMsgId = UUID.randomUUID().toString()
@@ -339,7 +345,11 @@ fun ConsultationScreen(
                 border = BorderStroke(1.dp, NotionBorder)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    if (aiStatus == FeatureStatus.UNAVAILABLE) {
+                    if (showLoading) {
+                        Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = NotionSafeGreen, strokeWidth = 2.dp)
+                        }
+                    } else if (aiStatus == FeatureStatus.UNAVAILABLE) {
                         val uriHandler = LocalUriHandler.current
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -437,8 +447,19 @@ fun ConsultationScreen(
                                                 } else ""
                                                 
                                                 val fullPrompt = """
-                                                    あなたは家計管理AIアシスタント「覗き魔AI」です。
-                                                    ユーザーの資産状況と支出履歴をもとに、親身かつ少し鋭い視点でアドバイスしてください。
+                                                    あなたは丁寧でウィットに富んだ家計の相棒です。
+                                                    資産状況と支出履歴をもとに、現状の課題や改善の余地を、です・ます調でユーモラスに指摘してください。
+                                                    
+                                                    【出力ルール】
+                                                    ・150文字程度で簡潔にまとめてください。
+                                                    ・質問の範囲が広い場合はまず全体像を要約し、最も重要な1〜2点に絞って伝えてください。
+                                                    ・最後に必ず「〇〇についてもっと詳しく聞きたいですか？」といった深掘りのための問いかけを1つ添えてください。
+                                                    
+                                                    【禁止事項】
+                                                    ・自己紹介、精神論、タメ口
+                                                    ・「ユーモアを持って」「皮肉を交えて」といった、自身の振る舞い方に関するメタな言及
+                                                    
+                                                    数字や傾向に基づく現実的な話を直接伝えてください。
                                                     
                                                     $assetContext
                                                     $recentTxContext
@@ -530,8 +551,16 @@ fun ConsultationScreen(
                                     } else ""
                                     
                                     val fullPrompt = """
-                                        あなたは家計管理AIアシスタント「覗き魔AI」です。
-                                        ユーザーの資産状況と支出履歴をもとに、親身かつ少し鋭い視点でアドバイスしてください。
+                                        あなたは丁寧かつユーモラスな家計の相棒です。
+                                        資産状況と支出履歴をもとに、現実的なアドバイスをしてください。
+                                        
+                                        【出力ルール】
+                                        ・150文字程度で簡潔にまとめてください。
+                                        ・質問の範囲が広い場合はまず全体像を要約し、重要な点に絞って伝えてください。
+                                        ・最後に必ず、詳細を聞き出すための問いかけを1つ添えてください。
+                                        
+                                        自己紹介、精神論、タメ口、および「ウィットを効かせます」といった指示内容への言及は禁止です。
+                                        丁寧な言葉遣い（です・ます調）で、データの裏にある事実を突くような回答を「直接」お願いします。
                                         
                                         $assetContext
                                         $recentTxContext
@@ -647,8 +676,16 @@ fun ConsultationScreen(
                                         } + "\n\n"
 
                                         val fullPrompt = """
-                                            あなたは家計管理AIアシスタント「覗き魔AI」です。
-                                            ユーザーの資産状況と支出履歴をもとに、親身かつ少し鋭い視点でアドバイスしてください。
+                                            あなたは丁寧でウィットに富んだ家計の相棒です。
+                                            資産状況、支出履歴、これまでの会話をもとに、実利的なアドバイスをしてください。
+                                            
+                                            【出力ルール】
+                                            ・150文字程度で端的に伝えてください。
+                                            ・全体を要約した上で、重要なポイントを絞って指摘してください。
+                                            ・最後に必ず、深掘りするための問いかけを1つ添えてください。
+                                            
+                                            自己紹介、精神論、タメ口、および自身の回答方針（ユーモア等）への言及は禁止です。
+                                            丁寧な言葉遣い（です・ます調）で、現状の数字から言えることを端的に伝えてください。
                                             
                                             $assetContext
                                             $recentTxContext
