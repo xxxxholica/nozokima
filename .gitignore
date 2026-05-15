@@ -1,15 +1,25 @@
+# --- 修正・追加した項目 ---
+.gradle/
+/build/
+/local.properties      # 重複を削除
+.kotlin/               # ★新規追加（現状漏れている）
+
+# --- IDE (Android Studio) 設定 ---
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
 /.idea/workspace.xml
+/.idea/libraries
+/.idea/caches
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
+/.idea/modules.xml
+/.idea/deploymentTargetSelector.xml  # ★新規追加（現状漏れている）
+/.idea/studiobot.xml                 # ★新規追加（現状漏れている）
+
+# --- その他 OS / Android 特有 ---
 .DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
+/captures/
+*.apk                  # ★新規追加
+*.aar                  # ★新規追加
+*.hprof                # ★新規追加
+.externalNativeBuild/
+.cxx/

@@ -26,19 +26,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.nozokima.*
 import com.example.nozokima.model.*
 import com.example.nozokima.data.local.*
 import com.example.nozokima.data.local.entities.*
 import com.example.nozokima.data.manager.*
 import com.example.nozokima.ui.components.CustomKeypad
-import com.example.nozokima.ui.components.InputTile
 import com.example.nozokima.ui.components.ScreenHeader
 import com.example.nozokima.util.evaluateExpression
 import com.google.mlkit.genai.common.FeatureStatus
@@ -151,9 +146,6 @@ fun GoalSettingContent(
         }
     }
 
-    // 達成履歴の自動記録 (削除されました)
-
-
     BackHandler(enabled = isKeypadVisible) { onKeypadVisibilityChange(false) }
     BackHandler(enabled = !isKeypadVisible) { onBack() }
 
@@ -209,7 +201,6 @@ fun GoalSettingContent(
                             when (targetStep) {
                                 3 -> {
                                     GoalAchievedView(
-                                        titleText = titleText,
                                         actualTotalAssets = actualTotalAssets,
                                         targetAmount = targetAmount,
                                         totalSpendable = totalSpendable,
@@ -218,7 +209,6 @@ fun GoalSettingContent(
                                         targetDateMillis = targetDateMillis,
                                         remainingDays = remainingDays,
                                         aiStatus = aiStatus,
-                                        aiIsReady = aiIsReady,
                                         aiIsGenerating = aiIsGenerating,
                                         showAiProgress = showAiProgress,
                                         aiStatusLabel = aiStatusLabel,
@@ -230,7 +220,6 @@ fun GoalSettingContent(
                                 }
                                 2 -> {
                                     GoalProgressView(
-                                        titleText = titleText,
                                         actualTotalAssets = actualTotalAssets,
                                         targetAmount = targetAmount,
                                         totalSpendable = totalSpendable,
@@ -239,7 +228,6 @@ fun GoalSettingContent(
                                         targetDateMillis = targetDateMillis,
                                         remainingDays = remainingDays,
                                         aiStatus = aiStatus,
-                                        aiIsReady = aiIsReady,
                                         aiIsGenerating = aiIsGenerating,
                                         showAiProgress = showAiProgress,
                                         aiStatusLabel = aiStatusLabel,
@@ -458,7 +446,6 @@ fun GoalSettingContent(
 
 @Composable
 fun GoalAchievedView(
-    titleText: String,
     actualTotalAssets: Long,
     targetAmount: Long,
     totalSpendable: Long,
@@ -467,7 +454,6 @@ fun GoalAchievedView(
     targetDateMillis: Long,
     remainingDays: Int,
     aiStatus: Int,
-    aiIsReady: Boolean,
     aiIsGenerating: Boolean,
     showAiProgress: Boolean,
     aiStatusLabel: String?,
@@ -489,13 +475,11 @@ fun GoalAchievedView(
             ) {
                 Text("🎉 Congratulations! 🎉", color = Color(0xFFF57F17), fontSize = 24.sp, fontWeight = FontWeight.Black)
                 Spacer(Modifier.height(8.dp))
-                val achievementTitle = if (titleText.isNotEmpty()) "「${titleText}」を達成しました！" else "目標を達成しました！"
-                Text(achievementTitle, color = NotionTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("目標を達成しました！", color = NotionTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
         }
 
         GoalProgressView(
-            titleText = titleText,
             actualTotalAssets = actualTotalAssets,
             targetAmount = targetAmount,
             totalSpendable = totalSpendable,
@@ -504,7 +488,6 @@ fun GoalAchievedView(
             targetDateMillis = targetDateMillis,
             remainingDays = remainingDays,
             aiStatus = aiStatus,
-            aiIsReady = aiIsReady,
             aiIsGenerating = aiIsGenerating,
             showAiProgress = showAiProgress,
             aiStatusLabel = aiStatusLabel,
@@ -657,7 +640,6 @@ fun SimulationTile(icon: androidx.compose.ui.graphics.vector.ImageVector, label:
 
 @Composable
 fun GoalProgressView(
-    titleText: String,
     actualTotalAssets: Long,
     targetAmount: Long,
     totalSpendable: Long,
@@ -666,7 +648,6 @@ fun GoalProgressView(
     targetDateMillis: Long,
     remainingDays: Int,
     aiStatus: Int,
-    aiIsReady: Boolean,
     aiIsGenerating: Boolean,
     showAiProgress: Boolean,
     aiStatusLabel: String?,
@@ -682,7 +663,6 @@ fun GoalProgressView(
     val totalGoalDays = ((targetDateMillis - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(1L)
     val passedDays = ((System.currentTimeMillis() - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
     val timeProgressRatio = (passedDays.toFloat() / totalGoalDays.toFloat()).coerceIn(0f, 1f)
-    val dateFormatter = remember { SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN) }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // Full Width Row: Assets/Target
@@ -936,17 +916,16 @@ fun AiAdvisorCard(
                     Text(text = if (isUnavailable) "覗き魔AI は利用できません" else "覗き魔 AI", color = themeColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.weight(1f))
                     if (!isUnavailable) {
-                        val isGenerating = aiIsGenerating
                         val hasText = goalAiText.isNotEmpty()
                         
                         // 再生成ボタン (アイコンのみ)
                         Surface(
                             onClick = onRefreshAi,
-                            enabled = !isGenerating,
+                            enabled = !aiIsGenerating,
                             modifier = Modifier.size(28.dp),
                             shape = RoundedCornerShape(8.dp),
-                            color = if (isGenerating) NotionBorder.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.1f),
-                            contentColor = if (isGenerating) NotionTextSecondary.copy(alpha = 0.5f) else themeColor
+                            color = if (aiIsGenerating) NotionBorder.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.1f),
+                            contentColor = if (aiIsGenerating) NotionTextSecondary.copy(alpha = 0.5f) else themeColor
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
@@ -956,11 +935,11 @@ fun AiAdvisorCard(
                         // 詳しく聞くボタン
                         Surface(
                             onClick = { onAiAdviceClick(goalAiText) },
-                            enabled = !isGenerating && hasText,
+                            enabled = !aiIsGenerating && hasText,
                             modifier = Modifier.height(28.dp),
                             shape = RoundedCornerShape(8.dp),
-                            color = if (isGenerating || !hasText) NotionBorder.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.1f),
-                            contentColor = if (isGenerating || !hasText) NotionTextSecondary.copy(alpha = 0.5f) else themeColor
+                            color = if (aiIsGenerating || !hasText) NotionBorder.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.1f),
+                            contentColor = if (aiIsGenerating || !hasText) NotionTextSecondary.copy(alpha = 0.5f) else themeColor
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 8.dp),

@@ -4,7 +4,6 @@ package com.example.nozokima.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -433,11 +432,10 @@ fun ConsultationScreen(
                                     enabled = isReady,
                                     onClick = {
                                         if (isReady && !isGenerating) {
-                                            val userMsg = question
                                             scope.launch {
                                                 val sessionId = UUID.randomUUID().toString()
-                                                dao.insertChatMessage(ChatMessageEntity(sessionId = sessionId, text = userMsg, isUser = true))
-                                                dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = userMsg.take(20), lastMessageAt = System.currentTimeMillis()))
+                                                dao.insertChatMessage(ChatMessageEntity(sessionId = sessionId, text = question, isUser = true))
+                                                dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = question.take(20), lastMessageAt = System.currentTimeMillis()))
                                                 onSessionSelected(sessionId)
                                                 
                                                 val assetContext = buildString {
@@ -469,7 +467,7 @@ fun ConsultationScreen(
                                                     
                                                     $assetContext
                                                     $recentTxContext
-                                                    ユーザーの質問: $userMsg
+                                                    ユーザーの質問: $question
                                                 """.trimIndent()
 
                                                 val aiMsgId = UUID.randomUUID().toString()
@@ -530,12 +528,11 @@ fun ConsultationScreen(
                         enabled = isReady,
                         onClick = {
                             if (isReady && !isGenerating) {
-                                val userMsg = question
                                 scope.launch {
                                     val sessionId = currentSessionId ?: UUID.randomUUID().toString()
-                                    dao.insertChatMessage(ChatMessageEntity(sessionId = sessionId, text = userMsg, isUser = true))
+                                    dao.insertChatMessage(ChatMessageEntity(sessionId = sessionId, text = question, isUser = true))
                                     if (currentSessionId == null) {
-                                        dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = userMsg.take(20), lastMessageAt = System.currentTimeMillis()))
+                                        dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = question.take(20), lastMessageAt = System.currentTimeMillis()))
                                         onSessionSelected(sessionId)
                                     }
                                     
@@ -567,7 +564,7 @@ fun ConsultationScreen(
                                         
                                         $assetContext
                                         $recentTxContext
-                                        ユーザーの質問: $userMsg
+                                        ユーザーの質問: $question
                                     """.trimIndent()
 
                                     val aiMsgId = UUID.randomUUID().toString()

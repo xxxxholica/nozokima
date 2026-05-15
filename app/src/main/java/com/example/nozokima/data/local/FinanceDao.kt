@@ -38,11 +38,6 @@ interface FinanceDao {
     @Delete
     suspend fun deleteAsset(asset: AssetEntity)
 
-    @Query("DELETE FROM assets WHERE category = :category")
-    suspend fun deleteAssetsByCategory(category: String)
-
-    @Query("UPDATE assets SET category = :newCategory WHERE category = :oldCategory")
-    suspend fun updateCategoryName(oldCategory: String, newCategory: String)
 
     @Query("SELECT * FROM assets WHERE name = :assetName LIMIT 1")
     suspend fun getAssetByName(assetName: String): AssetEntity?
@@ -146,8 +141,6 @@ interface FinanceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAppSettings(settings: AppSettingsEntity)
 
-    @Query("DELETE FROM app_settings")
-    suspend fun deleteAllAppSettings()
 
     @Query("SELECT * FROM categories ORDER BY `order` ASC")
     fun getAllCategories(): Flow<List<CategoryEntity>>
@@ -170,18 +163,6 @@ interface FinanceDao {
     @Query("DELETE FROM categories")
     suspend fun deleteAllCategories()
 
-    // 目標履歴
-    @Query("SELECT * FROM goal_histories ORDER BY endDateMillis DESC")
-    fun getAllGoalHistories(): Flow<List<GoalHistoryEntity>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertGoalHistory(history: GoalHistoryEntity)
-
-    @Delete
-    suspend fun deleteGoalHistory(history: GoalHistoryEntity)
-
-    @Query("DELETE FROM goal_histories")
-    suspend fun deleteAllGoalHistories()
 
     // 予定支出関連
     @Query("SELECT * FROM scheduled_expenses ORDER BY date ASC")

@@ -4,8 +4,7 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import com.example.nozokima.data.local.entities.*
 
-@Database(entities = [TransactionEntity::class, AssetEntity::class, BudgetEntity::class, GoalSettingEntity::class, LendingEntity::class, ChatSessionEntity::class, ChatMessageEntity::class, AppSettingsEntity::class, CategoryEntity::class, GoalHistoryEntity::class, ScheduledExpenseEntity::class], version = 16)
+@Database(entities = [TransactionEntity::class, AssetEntity::class, BudgetEntity::class, GoalSettingEntity::class, LendingEntity::class, ChatSessionEntity::class, ChatMessageEntity::class, AppSettingsEntity::class, CategoryEntity::class, ScheduledExpenseEntity::class], version = 17)
 abstract class AppDatabase : RoomDatabase() {
-    abstract fun transactionDao(): TransactionDao
     abstract fun financeDao(): FinanceDao
 }
