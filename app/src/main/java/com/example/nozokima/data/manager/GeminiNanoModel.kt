@@ -1,12 +1,10 @@
 package com.example.nozokima.data.manager
 
 import android.content.Context
-import android.util.Log
 import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.prompt.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,13 +15,13 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
 
-class GeminiNanoModel(private val context: Context) {
+class GeminiNanoModel(@Suppress("UNUSED_PARAMETER") context: Context) {
     private val generativeModel = Generation.getClient()
 
-    private val _status = MutableStateFlow<Int>(FeatureStatus.UNAVAILABLE)
+    private val _status = MutableStateFlow(FeatureStatus.UNAVAILABLE)
     val status: StateFlow<Int> = _status.asStateFlow()
 
-    private val _isDownloading = MutableStateFlow(false)
+    private val _isDownloading = MutableStateFlow(value = false)
     val isDownloading: StateFlow<Boolean> = _isDownloading.asStateFlow()
 
     private val _downloadProgress = MutableStateFlow(0)
@@ -32,16 +30,16 @@ class GeminiNanoModel(private val context: Context) {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    private val _isReady = MutableStateFlow(false)
+    private val _isReady = MutableStateFlow(value = false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
 
-    private val _isGenerating = MutableStateFlow(false)
+    private val _isGenerating = MutableStateFlow(value = false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
-    private val _isCheckingStatus = MutableStateFlow(false)
+    private val _isCheckingStatus = MutableStateFlow(value = false)
     val isCheckingStatus: StateFlow<Boolean> = _isCheckingStatus.asStateFlow()
 
-    private val _isInitialized = MutableStateFlow(false)
+    private val _isInitialized = MutableStateFlow(value = false)
     val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
 
     private var totalBytesToDownload: Long = 1L // 0除算防止
@@ -53,9 +51,7 @@ class GeminiNanoModel(private val context: Context) {
             _status.value = currentStatus
             _isReady.value = currentStatus == FeatureStatus.AVAILABLE
             _isInitialized.value = true
-            Log.d("GeminiNanoModel", "Model status: $currentStatus")
-        } catch (e: Exception) {
-            Log.e("GeminiNanoModel", "Error checking status", e)
+        } catch (_: Exception) {
             _errorMessage.value = "AIの状態確認に失敗しました。"
         } finally {
             _isCheckingStatus.value = false
@@ -72,29 +68,25 @@ class GeminiNanoModel(private val context: Context) {
                 when (downloadStatus) {
                     is DownloadStatus.DownloadStarted -> {
                         totalBytesToDownload = downloadStatus.bytesToDownload.coerceAtLeast(1L)
-                        Log.d("GeminiNanoModel", "Download started: $totalBytesToDownload bytes")
                     }
                     is DownloadStatus.DownloadProgress -> {
-                        val progress = (downloadStatus.totalBytesDownloaded * 100 / totalBytesToDownload).toInt()
+                        val progress = ((downloadStatus.totalBytesDownloaded * 100) / totalBytesToDownload).toInt()
                         _downloadProgress.value = progress.coerceIn(0, 100)
                     }
                     is DownloadStatus.DownloadCompleted -> {
                         _isDownloading.value = false
                         _downloadProgress.value = 100
                         checkModelStatus()
-                        Log.i("GeminiNanoModel", "Download completed")
                     }
                     is DownloadStatus.DownloadFailed -> {
                         _isDownloading.value = false
                         _errorMessage.value = "ダウンロードに失敗しました。ストレージ空き容量を確認してください。"
-                        Log.e("GeminiNanoModel", "Download failed: ${downloadStatus.e.message}")
                     }
                 }
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             _isDownloading.value = false
             _errorMessage.value = "ダウンロードエラーが発生しました。"
-            Log.e("GeminiNanoModel", "Error during download", e)
         }
     }
 
@@ -110,7 +102,6 @@ class GeminiNanoModel(private val context: Context) {
             val response = generativeModel.generateContent(prompt)
             response.candidates.firstOrNull()?.text ?: "応答が空でした。"
         } catch (e: Exception) {
-            Log.e("GeminiNanoModel", "Generation error", e)
             val msg = e.message ?: ""
             if (msg.contains("context", ignoreCase = true) || msg.contains("token", ignoreCase = true)) {
                 "分析を完了できませんでした。"
@@ -156,7 +147,6 @@ class GeminiNanoModel(private val context: Context) {
                 lastText = currentText
             }
         } catch (e: Exception) {
-            Log.e("GeminiNanoModel", "Streaming generation error", e)
             val msg = e.message ?: ""
             if (!msg.contains("context", ignoreCase = true) && !msg.contains("token", ignoreCase = true)) {
                 emit("エラーが発生しました: $msg")

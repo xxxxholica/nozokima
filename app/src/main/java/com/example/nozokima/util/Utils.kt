@@ -18,7 +18,7 @@ fun evaluateExpression(expression: String): Int {
         
         // 末尾が演算子の場合は、その演算子を除去して計算する
         var cleanExpression = normalized
-        while (cleanExpression.isNotEmpty() && cleanExpression.last() in "+-*/") {
+        while (cleanExpression.isNotEmpty() && (cleanExpression.last() in "+-*/")) {
             cleanExpression = cleanExpression.dropLast(1)
         }
         
@@ -45,55 +45,14 @@ fun evaluateExpression(expression: String): Int {
             i += 2
         }
         result.toInt()
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         0
     }
 }
 
 fun generateSecurePassword(): String {
     val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+"
-    return (1..16).map { chars.random() }.joinToString("")
-}
-
-val currencyVisualTransformation = androidx.compose.ui.text.input.VisualTransformation { text ->
-    val original = text.text
-    if (original.isEmpty()) {
-        return@VisualTransformation androidx.compose.ui.text.input.TransformedText(
-            androidx.compose.ui.text.AnnotatedString("¥ 0"),
-            object : androidx.compose.ui.text.input.OffsetMapping {
-                override fun originalToTransformed(offset: Int) = 3
-                override fun transformedToOriginal(offset: Int) = 0
-            }
-        )
-    }
-
-    val formatted = try {
-        "¥ " + String.format(java.util.Locale.JAPAN, "%,d", original.toLong())
-    } catch (e: Exception) {
-        "¥ $original"
-    }
-
-    val offsetMapping = object : androidx.compose.ui.text.input.OffsetMapping {
-        override fun originalToTransformed(offset: Int): Int {
-            if (offset <= 0) return 2
-            var digitCount = 0
-            var i = 0
-            while (digitCount < offset && i < formatted.length) {
-                if (formatted[i].isDigit()) digitCount++
-                i++
-            }
-            return maxOf(2, i)
-        }
-
-        override fun transformedToOriginal(offset: Int): Int {
-            var digitCount = 0
-            for (i in 0 until minOf(offset, formatted.length)) {
-                if (formatted[i].isDigit()) digitCount++
-            }
-            return digitCount
-        }
-    }
-    androidx.compose.ui.text.input.TransformedText(androidx.compose.ui.text.AnnotatedString(formatted), offsetMapping)
+    return (1..16).asSequence().map { chars.random() }.joinToString("")
 }
 
 /**

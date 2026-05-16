@@ -9,7 +9,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -77,20 +76,20 @@ fun InputScreen(
     ocrManager: OcrManager? = null,
     initialRecovery: LendingEntity? = null,
     onRecoveryHandled: () -> Unit = {},
-    onExternalActivityLaunch: () -> Unit = {}
+    onExternalActivityLaunch: () -> Unit = {},
 ) {
     val modes = listOf("支出", "収入", "振替", "貸付", "回収")
     var selectedMode by remember { mutableStateOf(if (initialRecovery != null) "回収" else "支出") }
     var selectedPaymentType by remember { mutableStateOf("即時") }
     
     var amountText by remember { mutableStateOf(if (initialRecovery != null) (initialRecovery.amount - initialRecovery.recoveredAmount).toString() else "") }
-    var memoText by remember { mutableStateOf(if (initialRecovery != null) initialRecovery.memo else "") }
+    var memoText by remember { mutableStateOf(initialRecovery?.memo ?: "") }
     var personName by remember { mutableStateOf(if (initialRecovery != null) initialRecovery.personName else "") }
     var selectedLending by remember { mutableStateOf(initialRecovery) }
     
     var selectedAssetEntity by remember { mutableStateOf<AssetEntity?>(null) }
     var selectedToAssetEntity by remember { mutableStateOf<AssetEntity?>(null) }
-    var showAssetSheet by remember { mutableStateOf(false) }
+    var showAssetSheet by remember { mutableStateOf(value = false) }
     var showToAssetSheet by remember { mutableStateOf(false) }
     var showCategorySheet by remember { mutableStateOf(false) }
     var showLendingSheet by remember { mutableStateOf(false) }
@@ -195,7 +194,7 @@ fun InputScreen(
                     return@launch
                 }
 
-                if (gemini == null || !gemini.isReady.value) {
+                if ((gemini == null) || !gemini.isReady.value) {
                     val amount = ocrManager?.extractAmount(uri)
                     if (amount != null) amountText = amount.toString()
                     snackbarHostState.showSnackbar("AIが準備中のため金額のみ抽出しました")
@@ -250,7 +249,7 @@ fun InputScreen(
                             try {
                                 val date = format.parse(dateStr)
                                 if (date != null) selectedDate = date.time
-                            } catch (e: Exception) {}
+                            } catch (_: Exception) {}
                         }
                         trimmed.startsWith("ASSET:") -> {
                             val assetName = trimmed.substringAfter("ASSET:").trim()
@@ -365,7 +364,8 @@ fun InputScreen(
                     "支出", "収入" -> {
                         val isExp = currentMode == "支出"
                         if (isExp && selectedPaymentType != "即時") {
-                            dao.insertScheduledExpense(ScheduledExpenseEntity(
+                            dao.insertScheduledExpense(
+                                ScheduledExpenseEntity(
                                 name = currentMemo.ifBlank { currentCategory },
                                 amount = amountValue,
                                 category = currentCategory,
@@ -452,14 +452,14 @@ fun InputScreen(
                             dao.insertTransaction(TransactionEntity(
                                 id = UUID.randomUUID().toString(),
                                 name = "${lending.personName}${if (!isFullyRecovered) " (一部)" else ""}",
-                                amount = currentRecoveryAmount,
+                                amount = amountValue,
                                 category = "回収",
                                 date = selectedDate,
                                 assetName = asset.name,
                                 isExpense = false
                             ))
                             dao.updateAsset(asset.copy(
-                                amount = asset.amount + currentRecoveryAmount,
+                                amount = asset.amount + amountValue,
                                 lastUpdated = System.currentTimeMillis()
                             ))
                         }
@@ -1058,7 +1058,7 @@ fun InputScreen(
                                 Text(lending.personName, fontWeight = FontWeight.Bold)
                                 Text(lending.memo.ifBlank { "無題" }, fontSize = 12.sp, color = NotionTextSecondary)
                             }
-                            Text("¥ ${String.format("%,d", lending.amount - lending.recoveredAmount)}", color = Color(0xFFFB8C00), fontWeight = FontWeight.Bold)
+                            Text("¥ ${String.format(Locale.JAPAN, "%,d", lending.amount - lending.recoveredAmount)}", color = Color(0xFFFB8C00), fontWeight = FontWeight.Bold)
                         }
                     }
                 }

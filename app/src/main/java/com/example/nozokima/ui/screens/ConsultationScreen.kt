@@ -39,14 +39,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.nozokima.*
 import com.example.nozokima.model.*
 import com.example.nozokima.data.local.*
 import com.example.nozokima.data.local.entities.*
 import com.example.nozokima.data.manager.*
 import com.example.nozokima.ui.components.ChatBubble
 import com.example.nozokima.ui.components.DeleteConfirmDialog
-import com.example.nozokima.ui.components.ThinkingAnimation
 import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.launch
 import ui.theme.*
@@ -59,7 +57,7 @@ private val PRESET_QUESTIONS = listOf(
     "節約のアドバイスをちょうだい",
     "無駄遣いしていないかチェックして",
     "今の資産で目標達成できる？",
-    "貸付金の状況を教えて"
+    "貸付金の状況を教えて",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,7 +76,7 @@ fun ConsultationScreen(
     initialTransaction: Transaction? = null,
     onClearConsultation: () -> Unit = {},
     initialHomeAdviceText: String? = null,
-    onClearHomeAdvice: () -> Unit = {}
+    onClearHomeAdvice: () -> Unit = {},
 ) {
     var inputText by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
@@ -88,25 +86,25 @@ fun ConsultationScreen(
     val messages by if (currentSessionId != null) {
         dao.getMessagesForSession(currentSessionId).collectAsState(initial = emptyList())
     } else {
-        remember { mutableStateOf(emptyList<ChatMessageEntity>()) }
+        remember { mutableStateOf(emptyList()) }
     }
 
     // --- 各種状態取得 ---
-    val isReady by (gemini?.isReady?.collectAsState() ?: remember { mutableStateOf(false) })
-    val isDownloading by (gemini?.isDownloading?.collectAsState() ?: remember { mutableStateOf(false) })
+    val isReady by (gemini?.isReady?.collectAsState() ?: remember { mutableStateOf(value = false) })
+    val isDownloading by (gemini?.isDownloading?.collectAsState() ?: remember { mutableStateOf(value = false) })
     val progress by (gemini?.downloadProgress?.collectAsState() ?: remember { mutableIntStateOf(0) })
-    val errorMsg by (gemini?.errorMessage?.collectAsState() ?: remember { mutableStateOf<String?>(null) })
-    val isGenerating by (gemini?.isGenerating?.collectAsState() ?: remember { mutableStateOf(false) })
-    val aiStatus by (gemini?.status?.collectAsState() ?: remember { mutableStateOf(FeatureStatus.UNAVAILABLE) })
-    val isInitialized by (gemini?.isInitialized?.collectAsState() ?: remember { mutableStateOf(false) })
-    val isChecking by (gemini?.isCheckingStatus?.collectAsState() ?: remember { mutableStateOf(false) })
+    val errorMsg by (gemini?.errorMessage?.collectAsState() ?: remember { mutableStateOf(null) })
+    val isGenerating by (gemini?.isGenerating?.collectAsState() ?: remember { mutableStateOf(value = false) })
+    val aiStatus by (gemini?.status?.collectAsState() ?: remember { mutableIntStateOf(FeatureStatus.UNAVAILABLE) })
+    val isInitialized by (gemini?.isInitialized?.collectAsState() ?: remember { mutableStateOf(value = false) })
+    val isChecking by (gemini?.isCheckingStatus?.collectAsState() ?: remember { mutableStateOf(value = false) })
     val isAvailable = aiStatus != FeatureStatus.UNAVAILABLE
 
     val showLoading = !isInitialized || isChecking
 
     // --- サジェスト生成ロジック ---
     fun generateSuggestions(currentMessages: List<ChatMessageEntity>) {
-        if (gemini == null || !isReady || isGenerating) return
+        if ((gemini == null) || !isReady || isGenerating) return
         scope.launch {
             val assetContext = buildString {
                 if (assets.isNotEmpty()) {
@@ -141,8 +139,8 @@ fun ConsultationScreen(
             
             try {
                 val response = gemini.generateResponse(prompt)
-                suggestedQuestions = response.lines().filter { it.isNotBlank() }.take(3)
-            } catch (e: Exception) {
+                suggestedQuestions = response.lineSequence().filter { it.isNotBlank() }.take(3).toList()
+            } catch (_: Exception) {
                 suggestedQuestions = emptyList()
             }
         }
@@ -164,11 +162,13 @@ fun ConsultationScreen(
             scope.launch {
                 dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = sessionTitle, lastMessageAt = System.currentTimeMillis()))
                 val userMsg = "支出「${initialTransaction.name}」(¥${String.format(Locale.JAPAN, "%,d", initialTransaction.amount)})について相談したいです。"
-                dao.insertChatMessage(ChatMessageEntity(
-                    sessionId = sessionId,
-                    text = userMsg,
-                    isUser = true
-                ))
+                dao.insertChatMessage(
+                    ChatMessageEntity(
+                        sessionId = sessionId,
+                        text = userMsg,
+                        isUser = true,
+                    ),
+                )
                 
                 onSessionSelected(sessionId)
                 onClearConsultation()
@@ -221,7 +221,7 @@ fun ConsultationScreen(
                         }
                         // 生成完了後にサジェストを生成
                         generateSuggestions(dao.getMessagesForSessionSync(sessionId))
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "分析中にエラーが発生しました。", isUser = false))
                     }
                 } else {
@@ -296,7 +296,7 @@ fun ConsultationScreen(
                         }
                         // 生成完了後にサジェストを生成
                         generateSuggestions(dao.getMessagesForSessionSync(sessionId))
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "分析中にエラーが発生しました。", isUser = false))
                     }
                 } else {
@@ -737,11 +737,10 @@ fun ChatHistoryDrawerContent(
         DeleteConfirmDialog(
             text = "このチャット履歴「${sessionToDelete?.title}」を削除しますか？",
             onDismiss = { sessionToDelete = null },
-            onConfirm = {
-                sessionToDelete?.id?.let { onDeleteSession(it) }
-                sessionToDelete = null
-            }
-        )
+        ) {
+            sessionToDelete?.id?.let { onDeleteSession(it) }
+            sessionToDelete = null
+        }
     }
 
     ModalDrawerSheet(

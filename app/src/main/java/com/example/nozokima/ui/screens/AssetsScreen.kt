@@ -19,7 +19,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.nozokima.*
 import com.example.nozokima.model.*
 import com.example.nozokima.data.local.*
 import com.example.nozokima.data.local.entities.*
@@ -37,7 +36,7 @@ import java.util.*
 fun AssetsScreen(
     dao: FinanceDao,
     onRecoverClick: (LendingEntity) -> Unit = {},
-    initialCategoryFilter: String? = null
+    initialCategoryFilter: String? = null,
 ) {
     val assetsFromDb by dao.getAllAssets().collectAsState(initial = emptyList())
     val transactions by dao.getAllTransactions().collectAsState(initial = emptyList())
@@ -103,7 +102,12 @@ fun AssetsScreen(
     var showAssetAmountEdit by remember { mutableStateOf(false) }
     var showAssetDeleteConfirm by remember { mutableStateOf(false) }
 
-    val assetCategoryOrder = remember(assetGroups) { assetGroups.withIndex().associateBy({ it.value }, { it.index }) }
+    val assetCategoryOrder = remember(assetGroups) {
+        assetGroups.withIndex().associateBy(
+            keySelector = { it.value },
+            valueTransform = { it.index },
+        )
+    }
     val sortedAssets = assetsFromDb.sortedWith(
         compareBy<AssetEntity>(
             { assetCategoryOrder[it.category] ?: Int.MAX_VALUE },
@@ -114,8 +118,8 @@ fun AssetsScreen(
     val lendings by dao.getAllLendings().collectAsState(initial = emptyList())
     val totalLendingAsset = lendings.filter { !it.isRecovered }.sumOf { it.amount }
 
-    val totalAssets = assetsFromDb.filter { it.amount > 0 }.sumOf { it.amount } + totalLendingAsset
-    val totalLiabilities = assetsFromDb.filter { it.amount < 0 }.sumOf { it.amount }.let { if (it < 0) it * -1 else it }
+    val totalAssets = assetsFromDb.asSequence().filter { it.amount > 0 }.sumOf { it.amount } + totalLendingAsset
+    val totalLiabilities = assetsFromDb.asSequence().filter { it.amount < 0 }.sumOf { it.amount }.let { if (it < 0) it * -1 else it }
     val totalNet = totalAssets - totalLiabilities
 
     val upcomingTotal = scheduledExpenses.filter { !it.isCompleted }.sumOf { it.amount }
@@ -331,29 +335,25 @@ fun AssetsScreen(
                     )
                     val dateFormatter = SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN)
 
-                    val filteredTransactions = transactions
-                        .filter { tx -> selectedHistoryAssetName == null || tx.assetName == selectedHistoryAssetName }
-                        .filter { tx -> selectedHistoryCategory == null || tx.category == selectedHistoryCategory }
-                        .filter { tx ->
-                            val txDate = tx.date
-                            txDate >= selectedStartDate && txDate <= selectedEndDate
-                        }
-                        .filter { tx ->
+                    val filteredTransactions = transactions.asSequence()
+                        .filter { selectedHistoryAssetName == null || it.assetName == selectedHistoryAssetName }
+                        .filter { selectedHistoryCategory == null || it.category == selectedHistoryCategory }
+                        .filter { it.date in selectedStartDate..selectedEndDate }
+                        .filter {
                             when (selectedExpenseFilter) {
-                                "支出のみ" -> tx.isExpense
-                                "収入のみ" -> !tx.isExpense
+                                "支出のみ" -> it.isExpense
+                                "収入のみ" -> !it.isExpense
                                 else -> true
                             }
                         }
                         .sortedByDescending { it.date }
+                        .toList()
 
-                    val filteredScheduledExpenses = sortedScheduledExpenses
-                        .filter { ex -> selectedHistoryAssetName == null || ex.assetName == selectedHistoryAssetName }
-                        .filter { ex -> selectedHistoryCategory == null || ex.category == selectedHistoryCategory }
-                        .filter { ex ->
-                            val exDate = ex.date
-                            exDate >= selectedStartDate && (selectedPeriodLabel == "全て" || exDate <= selectedEndDate)
-                        }
+                    val filteredScheduledExpenses = sortedScheduledExpenses.asSequence()
+                        .filter { selectedHistoryAssetName == null || it.assetName == selectedHistoryAssetName }
+                        .filter { selectedHistoryCategory == null || it.category == selectedHistoryCategory }
+                        .filter { (it.date >= selectedStartDate) && (selectedPeriodLabel == "全て" || (it.date <= selectedEndDate)) }
+                        .toList()
 
                     Column {
                         // フィルタバー
@@ -373,9 +373,10 @@ fun AssetsScreen(
                             FilterItem("ジャンル", selectedHistoryCategory != null),
                             FilterItem("期間", selectedStartDate > 0L),
                             if (!isScheduledHistoryMode) FilterItem("収支", selectedExpenseFilter != "全て") else null
-                        ).filter { 
-                            if (selectedHistoryAssetName != null && it.key == "資産") false else true
-                        }.sortedByDescending { it.active }
+                        ).asSequence()
+                            .filter { (selectedHistoryAssetName == null) || (it.key != "資産") }
+                            .sortedByDescending { it.active }
+                            .toList()
 
                         Row(
                             modifier = Modifier
@@ -716,7 +717,10 @@ fun AssetsScreen(
                     },
                     onClearAllClick = { editAmountText = "" },
                     onConfirmClick = {
-                        try { editAmountText = formatAmountWithCommas(evaluateExpression(editAmountText).toString()) } catch (e: Exception) {}
+                        try {
+                            editAmountText = formatAmountWithCommas(evaluateExpression(editAmountText).toString())
+                        } catch (_: Exception) {
+                        }
                     },
                     onSaveClick = {
                         val amountText = if (editAmountText.any { it in "+-*/" }) {
@@ -923,7 +927,10 @@ fun AssetsScreen(
                         },
                         onClearAllClick = { editAmountText = "" },
                         onConfirmClick = {
-                            try { editAmountText = formatAmountWithCommas(evaluateExpression(editAmountText).toString()) } catch (e: Exception) {}
+                            try {
+                                editAmountText = formatAmountWithCommas(evaluateExpression(editAmountText).toString())
+                            } catch (_: Exception) {
+                            }
                         },
                         onSaveClick = {
                             val amountText = if (editAmountText.any { it in "+-*/" }) {

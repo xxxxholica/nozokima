@@ -15,10 +15,8 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
@@ -43,7 +41,6 @@ import com.example.nozokima.model.*
 import com.example.nozokima.ui.components.*
 import com.example.nozokima.ui.screens.*
 import com.example.nozokima.util.*
-import com.example.nozokima.data.local.*
 import com.example.nozokima.data.local.entities.*
 import com.example.nozokima.data.manager.*
 import com.example.nozokima.ui.viewmodel.MainViewModel
@@ -62,11 +59,14 @@ class MainActivity : FragmentActivity() {
 
     private fun showBiometricPrompt(
         onSuccess: () -> Unit,
-        onError: (String) -> Unit = {}
+        onError: (String) -> Unit = {},
     ) {
         val executor = ContextCompat.getMainExecutor(this)
-        val biometricPrompt = BiometricPrompt(this, executor,
-            object : BiometricPrompt.AuthenticationCallback() {
+        val biometricPrompt =
+            BiometricPrompt(
+                this,
+                executor,
+                object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
                     onSuccess()
@@ -74,11 +74,12 @@ class MainActivity : FragmentActivity() {
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
-                    if (errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON && errorCode != BiometricPrompt.ERROR_USER_CANCELED) {
+                    if ((errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON) && (errorCode != BiometricPrompt.ERROR_USER_CANCELED)) {
                         onError(errString.toString())
                     }
                 }
-            })
+                },
+            )
 
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("生体認証")
@@ -126,13 +127,13 @@ class MainActivity : FragmentActivity() {
             var initialHomeAdviceText by remember { mutableStateOf<String?>(null) }
             var recoveryLending by remember { mutableStateOf<LendingEntity?>(null) }
             var initialAssetCategoryFilter by remember { mutableStateOf<String?>(null) }
-            var isGoalKeypadVisible by remember { mutableStateOf(false) }
+            var isGoalKeypadVisible by remember { mutableStateOf(value = false) }
 
             var backupPassword by remember { mutableStateOf("") }
-            var showBackupPasswordDialog by remember { mutableStateOf(false) }
+            var showBackupPasswordDialog by remember { mutableStateOf(value = false) }
             var backupMode by remember { mutableStateOf("") }
             var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
-            var showAppLockPasswordDialog by remember { mutableStateOf(false) }
+            var showAppLockPasswordDialog by remember { mutableStateOf(value = false) }
             var appLockDialogMode by remember { mutableStateOf("set") }
 
             val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -141,7 +142,7 @@ class MainActivity : FragmentActivity() {
             var isExternalActivityLaunching by rememberSaveable { mutableStateOf(false) }
             val appSettings = mainUiState.appSettings
             val isLoading = appSettings == null
-            val showLockScreen = isAppLocked && appSettings?.isAppLockEnabled == true
+            val showLockScreen = isAppLocked && (appSettings?.isAppLockEnabled == true)
             val lifecycle = LocalLifecycleOwner.current.lifecycle
 
             DisposableEffect(lifecycle) {
@@ -250,7 +251,7 @@ class MainActivity : FragmentActivity() {
 
             val activity = LocalContext.current as? android.app.Activity
             DisposableEffect(showBackupPasswordDialog) {
-                if (showBackupPasswordDialog && backupMode == "export") {
+                if (showBackupPasswordDialog && (backupMode == "export")) {
                     activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
                 }
                 onDispose { activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE) }
@@ -350,9 +351,9 @@ class MainActivity : FragmentActivity() {
                             onConfirmClick = {
                                 when {
                                     isDisableMode -> {
-                                        if (currentPasswordInput == appSettings?.appLockPassword) {
+                                        if (appSettings?.appLockPassword != null && currentPasswordInput == appSettings.appLockPassword) {
                                             scope.launch {
-                                                dao.upsertAppSettings(appSettings!!.copy(isAppLockEnabled = false, isBiometricEnabled = false))
+                                                dao.upsertAppSettings(appSettings.copy(isAppLockEnabled = false, isBiometricEnabled = false))
                                                 showAppLockPasswordDialog = false
                                             }
                                         } else {
@@ -522,29 +523,26 @@ class MainActivity : FragmentActivity() {
                     }
                 } else if (showLockScreen) {
                     AppLockScreen(
-                        correctPassword = appSettings?.appLockPassword ?: "",
+                        correctPassword = appSettings.appLockPassword ?: "",
                         onUnlock = { isAppLocked = false },
-                        failedAttempts = appSettings?.failedAttempts ?: 0,
-                        lockoutUntil = appSettings?.lockoutUntil ?: 0L,
+                        failedAttempts = appSettings.failedAttempts,
+                        lockoutUntil = appSettings.lockoutUntil,
                         onFailedAttempt = { attempts, until ->
                             scope.launch {
-                                val current = appSettings ?: AppSettingsEntity()
-                                dao.upsertAppSettings(current.copy(failedAttempts = attempts, lockoutUntil = until))
+                                dao.upsertAppSettings(appSettings.copy(failedAttempts = attempts, lockoutUntil = until))
                             }
                         },
                         onSuccessfulUnlock = {
                             scope.launch {
-                                val current = appSettings ?: AppSettingsEntity()
-                                dao.upsertAppSettings(current.copy(failedAttempts = 0, lockoutUntil = 0L))
+                                dao.upsertAppSettings(appSettings.copy(failedAttempts = 0, lockoutUntil = 0L))
                             }
                         },
-                        isBiometricEnabled = appSettings?.isBiometricEnabled == true,
+                        isBiometricEnabled = appSettings.isBiometricEnabled,
                         onBiometricClick = {
                             showBiometricPrompt(
                                 onSuccess = {
                                     scope.launch {
-                                        val current = appSettings ?: AppSettingsEntity()
-                                        dao.upsertAppSettings(current.copy(failedAttempts = 0, lockoutUntil = 0L))
+                                        dao.upsertAppSettings(appSettings.copy(failedAttempts = 0, lockoutUntil = 0L))
                                     }
                                     isAppLocked = false
                                 }
@@ -609,7 +607,6 @@ class MainActivity : FragmentActivity() {
                                                         initialHomeAdviceText = advice
                                                         selectedTab = 3
                                                     },
-                                                    onNavigateToSettings = { selectedTab = 4 },
                                                     onCategoryClick = { category ->
                                                         initialAssetCategoryFilter = category
                                                         selectedTab = 2
@@ -654,16 +651,15 @@ class MainActivity : FragmentActivity() {
                                             }
                                             4 -> Box(Modifier.padding(innerPadding)) {
                                                 GeneralSettingsScreen(
-                                                    appLockEnabled = appSettings?.isAppLockEnabled == true,
+                                                    appLockEnabled = appSettings.isAppLockEnabled,
                                                     onToggleAppLock = { enabled ->
                                                         appLockDialogMode = if (enabled) "set" else "disable"
                                                         showAppLockPasswordDialog = true
                                                     },
-                                                    biometricEnabled = appSettings?.isBiometricEnabled == true,
+                                                    biometricEnabled = appSettings.isBiometricEnabled,
                                                     onToggleBiometric = { enabled ->
                                                         scope.launch {
-                                                            val current = appSettings ?: AppSettingsEntity()
-                                                            dao.upsertAppSettings(current.copy(isBiometricEnabled = enabled))
+                                                            dao.upsertAppSettings(appSettings.copy(isBiometricEnabled = enabled))
                                                         }
                                                     },
                                                     isBiometricAvailable = isBiometricAvailable(),

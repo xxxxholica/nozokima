@@ -1,4 +1,3 @@
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -14,10 +13,8 @@ if (isWindows) {
         if (!tmpDir.exists()) tmpDir.mkdirs()
         if (tmpDir.exists() && tmpDir.canWrite()) {
             System.setProperty("java.io.tmpdir", tmpDir.absolutePath)
-            println("INFO: java.io.tmpdir set to ${tmpDir.absolutePath}")
         }
     } catch (e: Exception) {
-        println("WARNING: Failed to set custom java.io.tmpdir: ${e.message}")
     }
 }
 
@@ -37,11 +34,13 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

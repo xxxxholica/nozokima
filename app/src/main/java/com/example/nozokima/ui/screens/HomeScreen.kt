@@ -46,9 +46,8 @@ fun HomeScreen(
     dao: FinanceDao,
     onConsultClick: (Transaction) -> Unit = {},
     onAiAdviceClick: (String) -> Unit = {},
-    onNavigateToSettings: () -> Unit = {},
     onCategoryClick: (String) -> Unit = {},
-    onGoalClick: () -> Unit = {}
+    onGoalClick: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val appSettings by dao.getAppSettings().collectAsState(initial = null)
@@ -74,7 +73,7 @@ fun HomeScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(rememberScrollState()),
     ) {
         ScreenHeader(title = greeting)
         Spacer(modifier = Modifier.height(16.dp))
@@ -86,13 +85,12 @@ fun HomeScreen(
                 onRefreshAi = { viewModel.triggerHomeAnalysis() },
                 onAiAdviceClick = onAiAdviceClick,
                 onGoalClick = onGoalClick,
-                onToggleAssetsVisibility = {
-                    scope.launch {
-                        val current = appSettings ?: AppSettingsEntity()
-                        dao.upsertAppSettings(current.copy(isAssetsVisible = !current.isAssetsVisible))
-                    }
+            ) {
+                scope.launch {
+                    val current = appSettings ?: AppSettingsEntity()
+                    dao.upsertAppSettings(current.copy(isAssetsVisible = !current.isAssetsVisible))
                 }
-            )
+            }
 
             Spacer(modifier = Modifier.height(32.dp))
 
@@ -120,25 +118,28 @@ fun DashboardCard(
     onRefreshAi: () -> Unit,
     onAiAdviceClick: (String) -> Unit,
     onGoalClick: () -> Unit,
-    onToggleAssetsVisibility: () -> Unit
+    onToggleAssetsVisibility: () -> Unit,
 ) {
-    val totalLendingAmount = remember(uiState.lendings) { 
-        uiState.lendings.filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount } 
+    val totalLendingAmount = remember(uiState.lendings) {
+        uiState.lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
     }
     val currentAssets = remember(uiState.assets, totalLendingAmount) {
-        uiState.assets.sumOf { it.amount } + totalLendingAmount 
+        uiState.assets.sumOf { it.amount } + totalLendingAmount
     }.toLong()
 
     val startOfMonth = remember {
         Calendar.getInstance().apply {
             set(Calendar.DAY_OF_MONTH, 1)
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
         }.timeInMillis
     }
-    
+
     val spentThisMonth = remember(uiState.transactions, startOfMonth) {
-        uiState.transactions
-            .filter { it.date >= startOfMonth && it.isExpense && it.category != "貸付" }
+        uiState.transactions.asSequence()
+            .filter { (it.date >= startOfMonth) && it.isExpense && (it.category != "貸付") }
             .sumOf { it.amount }
     }.toLong()
 
@@ -305,7 +306,7 @@ fun GoalProgressSection(
 ) {
     val hasGoal = goalSetting != null && goalSetting.targetAmount > 0 && goalSetting.showResults
     
-    val progressRatio = if (hasGoal) (actualAssetsForGoal.toFloat() / goalSetting!!.targetAmount.toFloat()).coerceIn(0f, 1.2f) else 0f
+    val progressRatio = if (hasGoal) (actualAssetsForGoal.toFloat() / goalSetting.targetAmount.toFloat()).coerceIn(0f, 1.2f) else 0f
     val percentage = (progressRatio * 100).toInt()
     
     val animatedGoalProgress by animateFloatAsState(
@@ -316,7 +317,7 @@ fun GoalProgressSection(
 
     val goalDisplayTitle = when {
         !hasGoal -> "目標未設定"
-        goalSetting!!.title.isNotEmpty() -> goalSetting.title
+        (goalSetting?.title?.isNotEmpty() == true) -> goalSetting.title
         else -> "目標の貯金"
     }
 
@@ -596,9 +597,12 @@ fun RecordRow(
                 modifier = Modifier.size(32.dp).background(NotionBackground, CircleShape),
                 enabled = isExpense
             ) {
-                Icon(Icons.Default.Face, "AI相談",
+                Icon(
+                    imageVector = Icons.Default.Face,
+                    contentDescription = "AI相談",
                     tint = if (isExpense) NotionSafeGreen else NotionTextSecondary.copy(alpha = 0.4f),
-                    modifier = Modifier.size(18.dp))
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
@@ -620,8 +624,8 @@ fun MonthlyStatisticsSection(
     }
 
     val monthlyCategoryGroups = remember(transactions, startOfMonth) {
-        transactions
-            .filter { it.date >= startOfMonth && it.isExpense && it.category != "貸付" }
+        transactions.asSequence()
+            .filter { (it.date >= startOfMonth) && it.isExpense && (it.category != "貸付") }
             .groupBy { it.category }
             .mapValues { it.value.sumOf { t -> t.amount } }
             .toList()

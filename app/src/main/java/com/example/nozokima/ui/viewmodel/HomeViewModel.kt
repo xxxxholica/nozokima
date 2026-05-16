@@ -9,7 +9,6 @@ import com.example.nozokima.data.local.entities.AssetEntity
 import com.example.nozokima.data.local.entities.LendingEntity
 import com.example.nozokima.data.local.entities.BudgetEntity
 import com.example.nozokima.data.manager.GeminiNanoModel
-import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.*
@@ -26,12 +25,12 @@ data class HomeUiState(
     val aiStatus: Int = 0, // Using Int as per GeminiNanoModel
     val isAiReady: Boolean = false,
     val isAiCheckingStatus: Boolean = false,
-    val isAiInitialized: Boolean = false
+    val isAiInitialized: Boolean = false,
 )
 
 class HomeViewModel(
     private val dao: FinanceDao,
-    private val gemini: GeminiNanoModel
+    private val gemini: GeminiNanoModel,
 ) : ViewModel() {
 
     private val _homeAiText = MutableStateFlow("")
@@ -49,11 +48,15 @@ class HomeViewModel(
         gemini.status,
         gemini.isReady,
         gemini.isCheckingStatus,
-        gemini.isInitialized
+        gemini.isInitialized,
     ) { params ->
+        @Suppress("UNCHECKED_CAST")
         val transactions = params[0] as List<TransactionEntity>
+        @Suppress("UNCHECKED_CAST")
         val assets = params[1] as List<AssetEntity>
+        @Suppress("UNCHECKED_CAST")
         val lendings = params[2] as List<LendingEntity>
+        @Suppress("UNCHECKED_CAST")
         val budgets = params[3] as List<BudgetEntity>
         val goalSetting = params[4] as GoalSettingEntity?
         val homeAiText = params[5] as String
@@ -89,16 +92,19 @@ class HomeViewModel(
         if (!state.isAiReady || state.isAiGenerating) return
         
         // データの計算 (in background via Flow combination or here if needed immediately)
-        val totalLendingAmount = state.lendings.filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
+        val totalLendingAmount = state.lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
         val currentAssets = state.assets.sumOf { it.amount } + totalLendingAmount
-        
+
         val calendar = Calendar.getInstance().apply {
             set(Calendar.DAY_OF_MONTH, 1)
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
         }
         val startOfMonth = calendar.timeInMillis
-        val spentThisMonth = state.transactions
-            .filter { it.date >= startOfMonth && it.isExpense && it.category != "貸付" }
+        val spentThisMonth = state.transactions.asSequence()
+            .filter { (it.date >= startOfMonth) && it.isExpense && (it.category != "貸付") }
             .sumOf { it.amount }
             
         val defaultBudget = state.budgets.sumOf { it.monthlyAmount }.let { if (it == 0) 100000L else it.toLong() }
@@ -144,7 +150,8 @@ class HomeViewModel(
                     result += chunk
                     _homeAiText.value = result
                 }
-            } catch (ignore: Exception) {}
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -184,7 +191,7 @@ class HomeViewModel(
             appendLine()
             appendLine("目標: ${currentGoal.title}")
             appendLine("目標金額: ¥${String.format(Locale.JAPAN, "%,d", currentGoal.targetAmount)}")
-            appendLine("現在の資産: ¥${String.format(Locale.JAPAN, "%,d", currentAssets)}（達成率${progressPercent}%）")
+            appendLine("現在の資産: ¥${String.format(Locale.JAPAN, "%,d", currentAssets)}（達成率$progressPercent%）")
             appendLine("期限まで: $remainingDays 日（期間経過率${timeProgressPercent}%）")
             appendLine("今後の月予算目安: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
             
@@ -205,7 +212,8 @@ class HomeViewModel(
                     result += chunk
                     _goalAiText.value = result
                 }
-            } catch (ignore: Exception) {}
+            } catch (_: Exception) {
+            }
         }
     }
 }
