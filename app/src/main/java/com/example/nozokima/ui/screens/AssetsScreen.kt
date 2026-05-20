@@ -45,7 +45,7 @@ fun AssetsScreen(
     val scheduledExpenses by dao.getAllScheduledExpenses().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
 
-    // 期限が来た予定消費を自動処理
+    // 期限が来た支払い予定を自動処理
     LaunchedEffect(scheduledExpenses) {
         val now = System.currentTimeMillis()
         scheduledExpenses.filter { !it.isCompleted && it.date <= now }.forEach { expense ->
@@ -71,8 +71,12 @@ fun AssetsScreen(
 
     // システムの戻るボタンに対応
     BackHandler(enabled = isHistoryMode) {
-        isHistoryMode = false
-        isScheduledHistoryMode = false
+        if (initialHistoryMode) {
+            onBack()
+        } else {
+            isHistoryMode = false
+            isScheduledHistoryMode = false
+        }
     }
 
     var showGroupSheet by remember { mutableStateOf(false) }
@@ -134,16 +138,16 @@ fun AssetsScreen(
             ScreenHeader(
                 title = if (isHistoryMode) {
                     when {
-                        isScheduledHistoryMode -> "予定消費"
-                        selectedHistoryAssetName != null -> selectedHistoryAssetName ?: "収支履歴"
+                        isScheduledHistoryMode -> "支払い予定"
+                        selectedHistoryAssetName != null -> selectedHistoryAssetName ?: "履歴"
                         selectedHistoryCategory == "貸付" -> "貸付"
-                        else -> "収支履歴"
+                        else -> "履歴"
                     }
                 } else "資産状況",
                 navigationIcon = {
                     Surface(
                         onClick = {
-                            if (isHistoryMode) {
+                            if (isHistoryMode && !initialHistoryMode) {
                                 isHistoryMode = false
                                 isScheduledHistoryMode = false
                             } else {
@@ -201,13 +205,6 @@ fun AssetsScreen(
                                         .fillMaxWidth()
                                         .background(assetTypeUiSpec("総額").accentColor.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
                                         .border(1.dp, assetTypeUiSpec("総額").accentColor.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .clickable {
-                                            selectedHistoryAssetName = null
-                                            selectedHistoryCategory = null
-                                            isHistoryMode = true
-                                            isScheduledHistoryMode = false
-                                        }
                                         .padding(horizontal = 20.dp, vertical = 16.dp)
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -241,13 +238,6 @@ fun AssetsScreen(
                                         .fillMaxWidth()
                                         .background(Color(0xFF1976D2).copy(alpha = 0.08f), RoundedCornerShape(14.dp))
                                         .border(1.dp, Color(0xFF1976D2).copy(alpha = 0.25f), RoundedCornerShape(14.dp))
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .clickable {
-                                            selectedHistoryAssetName = null
-                                            selectedHistoryCategory = null
-                                            isHistoryMode = true
-                                            isScheduledHistoryMode = true
-                                        }
                                         .padding(horizontal = 20.dp, vertical = 16.dp)
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -269,6 +259,61 @@ fun AssetsScreen(
                                                 fontWeight = FontWeight.Bold,
                                                 letterSpacing = (-0.5).sp
                                             )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    // 履歴 (History)
+                                    Surface(
+                                        onClick = {
+                                            selectedHistoryAssetName = null
+                                            selectedHistoryCategory = null
+                                            isHistoryMode = true
+                                            isScheduledHistoryMode = false
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Color.White,
+                                        border = BorderStroke(1.dp, NotionBorder)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(vertical = 12.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.History, contentDescription = null, tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("履歴", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = NotionTextPrimary)
+                                        }
+                                    }
+
+                                    // 支払い予定 (Payment Schedule)
+                                    Surface(
+                                        onClick = {
+                                            selectedHistoryAssetName = null
+                                            selectedHistoryCategory = null
+                                            isHistoryMode = true
+                                            isScheduledHistoryMode = true
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Color.White,
+                                        border = BorderStroke(1.dp, NotionBorder)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(vertical = 12.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.Event, contentDescription = null, tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("支払い予定", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = NotionTextPrimary)
                                         }
                                     }
                                 }
@@ -612,7 +657,7 @@ fun AssetsScreen(
             dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
         ) {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
-                Text("カテゴリを選択", modifier = Modifier.padding(vertical = 16.dp), color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("ジャンルを選択", modifier = Modifier.padding(vertical = 16.dp), color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 
                 Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                     assetGroups.chunked(4).forEach { rowItems ->

@@ -17,6 +17,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -29,7 +30,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
@@ -41,6 +41,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -59,6 +61,8 @@ import com.example.nozokima.data.manager.*
 import com.example.nozokima.ui.components.ChatBubble
 import com.example.nozokima.ui.components.DeleteConfirmDialog
 import com.example.nozokima.ui.components.ScreenHeader
+import com.example.nozokima.ui.components.AssetHistoryItem
+import com.example.nozokima.ui.components.getCategoryIcon
 import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.launch
 import ui.theme.*
@@ -148,14 +152,14 @@ fun ConsultationScreen(
             }
             val prompt = """
                 あなたは実用的で実利的な家計の相棒です。
-                これまでのユーザーとの会話や現在の資産状況を踏まえて、ユーザーが次に聞きそうな「具体的なデータ確認」や「現実的な相談」の質問を3つ提案してください。
+                これまでのユーザーとの会話や現在の資産状況を踏めて、ユーザーが次に聞きそうな「具体的なデータ確認」や「現実的な相談」の質問を3つ提案してください。
                 
                 $assetContext
                 
                 $historyContext
                 
                 【出力ルール】
-                ・質問文のみを1行に1つ、合計3行で出力してください。
+                ・回答に忠実に答えるための質問文のみを1行に1つ、合計3行で出力してください。
                 ・「1.」「2.」といった数字や記号、箇条書きのマークは一切含めないでください。
                 ・丁寧な言葉遣い（です・ます調）で、文脈を汲み取った自然な日本語の質問にしてください。
                 ・質問は20文字以内で、答えやすい内容にしてください。
@@ -187,11 +191,14 @@ fun ConsultationScreen(
             
             scope.launch {
                 dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = sessionTitle, lastMessageAt = System.currentTimeMillis()))
-                val userMsg = "支出「${initialTransaction.name}」(¥${String.format(Locale.JAPAN, "%,d", initialTransaction.amount)})について相談したいです。"
+                val userMsgText = "この支出について相談したいです。"
+                val txTag = "[TX_CARD:${initialTransaction.name}|${initialTransaction.amount}|${initialTransaction.category}|${initialTransaction.date}]"
+                val displayMsg = "$userMsgText\n$txTag"
+                
                 dao.insertChatMessage(
                     ChatMessageEntity(
                         sessionId = sessionId,
-                        text = userMsg,
+                        text = displayMsg,
                         isUser = true,
                     ),
                 )
@@ -202,6 +209,7 @@ fun ConsultationScreen(
 
                 // AI応答の生成
                 if (gemini != null && isReady) {
+                    val userAiMsg = "支出「${initialTransaction.name}」(¥${String.format(Locale.JAPAN, "%,d", initialTransaction.amount)})について相談したいです。"
                     val assetContext = buildString {
                         if (assets.isNotEmpty()) {
                             appendLine("【現在の資産状況】")
@@ -223,13 +231,14 @@ fun ConsultationScreen(
 
                     val fullPrompt = """
                         あなたは家計の専門家です。
-                        ユーザーの特定の支出について、データに基づいた鋭い分析を直接伝えてください。
+                        ユーザーの特定の支出について、ユーザーの質問に忠実に答えてください。
                         
                         $assetContext
                         $recentTxContext
-                        ユーザーの相談: $userMsg
+                        ユーザーの相談: $userAiMsg
                         
                         【回答ルール】
+                        ・ユーザーの質問に対して的確に回答し、求められた場合を除き資産状況の整理やサマリーは行わないでください。
                         ・「深掘りする問いかけ：」「問いかけ：」などの見出しやラベルは絶対に書かないでください。
                         ・自己紹介、挨拶、タメ口、精神論は不要です。
                         ・丁寧な言葉遣い（です・ます調）で回答してください。
@@ -263,11 +272,18 @@ fun ConsultationScreen(
             val sessionId = UUID.randomUUID().toString()
             
             scope.launch {
+                val latestExpense = transactions.asSequence().filter { it.isExpense && it.category != "貸付" }.maxByOrNull { it.date }
+                val txTag = if (latestExpense != null) {
+                    "\n[TX_CARD:${latestExpense.name}|${latestExpense.amount}|${latestExpense.category}|${latestExpense.date}]"
+                } else ""
+
                 dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = sessionTitle, lastMessageAt = System.currentTimeMillis()))
                 val userMsg = "ホーム画面で提示された「$initialHomeAdviceText」というアドバイスについて、もっと詳しく教えてください。"
+                val displayMsg = userMsg + txTag
+                
                 dao.insertChatMessage(ChatMessageEntity(
                     sessionId = sessionId,
-                    text = userMsg,
+                    text = displayMsg,
                     isUser = true
                 ))
                 
@@ -277,6 +293,7 @@ fun ConsultationScreen(
 
                 // AI応答
                 if (gemini != null && isReady) {
+                    val userAiMsg = userMsg + (if (latestExpense != null) "\n(対象の支出: ${latestExpense.name} ¥${String.format(Locale.JAPAN, "%,d", latestExpense.amount)})" else "")
                     val assetContext = buildString {
                         if (assets.isNotEmpty()) {
                             appendLine("【現在の資産状況】")
@@ -298,13 +315,14 @@ fun ConsultationScreen(
 
                     val fullPrompt = """
                         あなたは家計の専門家です。
-                        ホーム画面でのアドバイスについて、具体的な根拠やアクションを実利的な視点で解説してください。
+                        ホーム画面でのアドバイスについて、ユーザーの質問に忠実に答え、具体的なアクションを実利的な視点で解説してください。
                         
                         $assetContext
                         $recentTxContext
-                        ユーザーの相談: $userMsg
+                        ユーザーの相談: $userAiMsg
                         
                         【回答ルール】
+                        ・ユーザーの質問に対して的確に回答し、求められた場合を除き資産状況の整理やサマリーは行わないでください。
                         ・「深掘りする問いかけ：」「問いかけ：」などの見出しやラベルは絶対に書かないでください。
                         ・自己紹介、タメ口、自身の性格設定への言及は不要です。
                         ・丁寧な言葉遣い（です・ます調）で、端的に回答してください。
@@ -356,10 +374,12 @@ fun ConsultationScreen(
         }
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
+    Column(modifier = modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
         // チャット画面ヘッダー
         ScreenHeader(
             title = if (currentSessionId == null) "新しい相談" else (chatSessions.find { it.id == currentSessionId }?.title ?: "AI相談"),
+            titleMaxLines = 1,
+            titleOverflow = TextOverflow.Ellipsis,
             navigationIcon = {
                 Surface(
                     onClick = onBack,
@@ -459,84 +479,6 @@ fun ConsultationScreen(
                     Spacer(Modifier.height(16.dp))
                     Text("覗き魔 AI に相談しましょう", color = NotionTextPrimary, fontWeight = FontWeight.Bold)
                     Text("資産や支出について質問してください", color = NotionTextSecondary, fontSize = 14.sp)
-
-                    if (suggestedQuestions.isNotEmpty()) {
-                        Spacer(Modifier.height(20.dp))
-                        Column(
-                            modifier = Modifier.padding(horizontal = 24.dp).alpha(if (isAvailable) 1f else 0.5f),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            suggestedQuestions.forEach { question ->
-                                SuggestionChip(
-                                    enabled = isReady,
-                                    onClick = {
-                                        if (isReady && !isGenerating) {
-                                            scope.launch {
-                                                val sessionId = UUID.randomUUID().toString()
-                                                dao.insertChatMessage(ChatMessageEntity(sessionId = sessionId, text = question, isUser = true))
-                                                dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = question.take(20), lastMessageAt = System.currentTimeMillis()))
-                                                onSessionSelected(sessionId)
-                                                
-                                                val assetContext = buildString {
-                                                    if (assets.isNotEmpty()) {
-                                                        appendLine("【現在の資産状況】")
-                                                        assets.forEach { appendLine("- ${it.name}: ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})") }
-                                                    }
-                                                    val activeLendings = lendings.filter { !it.isRecovered }
-                                                    if (activeLendings.isNotEmpty()) {
-                                                        appendLine("【貸付状況】")
-                                                        activeLendings.forEach { appendLine("- ${it.personName}への貸付: ¥${String.format(Locale.JAPAN, "%,d", it.amount - it.recoveredAmount)}") }
-                                                    }
-                                                }
-                                                val recentTxContext = if (transactions.isNotEmpty()) {
-                                                    "【直近の支出記録】\n" + transactions.take(10).joinToString("\n") { 
-                                                        "- ${SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
-                                                    } + "\n\n"
-                                                } else ""
-                                                
-                                                val fullPrompt = """
-                                                    あなたは家計の専門家です。現状を分析し、150文字以内で回答してください。
-                                                    
-                                                    【回答ルール】
-                                                    ・「深掘りする問いかけ：」「問いかけ：」などの見出しやラベル、記号は一切含めないでください。
-                                                    ・質問の範囲が指定されていない場合は、まず全体的な概要を回答してください。
-                                                    ・自己紹介、精神論、タメ口は禁止です。
-                                                    ・丁寧な言葉遣い（です・ます調）で、数字に基づく話をしてください。
-                                                    ・回答の最後に、自然な会話の流れでユーザーへの質問を一つ添えてください。
-                                                    
-                                                    $assetContext
-                                                    $recentTxContext
-                                                    ユーザーの質問: $question
-                                                """.trimIndent()
-
-                                                val aiMsgId = UUID.randomUUID().toString()
-                                                var accumulatedText = ""
-                                                dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "...", isUser = false))
-                                                suggestedQuestions = emptyList()
-
-                                                gemini?.generateResponseStream(fullPrompt)?.collect { chunk ->
-                                                    accumulatedText += chunk
-                                                    dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = accumulatedText, isUser = false))
-                                                }
-                                                generateSuggestions(dao.getMessagesForSessionSync(sessionId))
-                                            }
-                                        }
-                                    },
-                                    label = { Text(question, fontSize = 13.sp, textAlign = TextAlign.Center) },
-                                    colors = SuggestionChipDefaults.suggestionChipColors(
-                                        containerColor = Color.Transparent,
-                                        labelColor = NotionSafeGreen
-                                    ),
-                                    border = SuggestionChipDefaults.suggestionChipBorder(
-                                        borderColor = NotionSafeGreen.copy(alpha = 0.2f),
-                                        enabled = true
-                                    ),
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                            }
-                        }
-                    }
                 }
             } else {
                 LazyColumn(
@@ -553,15 +495,15 @@ fun ConsultationScreen(
             
         }
 
-        // サジェストされた質問（チャット進行中のみ表示。空画面時は中央に表示するため）
-        if (suggestedQuestions.isNotEmpty() && !isGenerating && messages.isNotEmpty()) {
+        // サジェストされた質問
+        if (suggestedQuestions.isNotEmpty() && !isGenerating) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
                     .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 2.dp)
                     .alpha(if (isAvailable) 1f else 0.5f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 suggestedQuestions.forEach { question ->
                     SuggestionChip(
@@ -594,9 +536,10 @@ fun ConsultationScreen(
                                     } else ""
                                     
                                     val fullPrompt = """
-                                        あなたは家計の専門家です。資産状況と支出履歴をもとに、150文字以内でアドバイスしてください。
+                                        あなたは家計の専門家です。資産状況と支出履歴をもとに、ユーザーの質問に忠実に答え、150文字以内でアドバイスしてください。
                                         
                                         【回答ルール】
+                                        ・ユーザーの質問に対して的確に回答し、求められた場合を除き資産状況の整理やサマリーは行わないでください。
                                         ・「深掘りする問いかけ：」「問いかけ：」などの見出しやラベルは絶対に書かないでください。
                                         ・自己紹介、精神論、タメ口は禁止です。
                                         ・丁寧な言葉遣い（です・ます調）で、事実を端的に伝えてください。
@@ -638,14 +581,14 @@ fun ConsultationScreen(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(NotionWhite)
+                .background(Color.Transparent)
+                .navigationBarsPadding()
+                .imePadding()
                 .alpha(if (isAvailable) 1f else 0.5f)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .imePadding()
             ) {
                 // 画像プレビューと選択された支出の表示
                 if (selectedImageUri != null || selectedTxForConsult != null) {
@@ -685,43 +628,57 @@ fun ConsultationScreen(
 
                         if (selectedTxForConsult != null) {
                             Surface(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(80.dp),
+                                modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(12.dp),
-                                color = NotionBackground,
+                                color = Color.White,
                                 border = BorderStroke(1.dp, NotionBorder)
                             ) {
-                                Box(modifier = Modifier.padding(12.dp)) {
-                                    Column(modifier = Modifier.align(Alignment.CenterStart)) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val icon = getCategoryIcon(selectedTxForConsult!!.category)
+                                    val color = Color(0xFFE57373)
+                                    
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .background(color.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                                            .border(1.dp, NotionBorder, RoundedCornerShape(10.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(imageVector = icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "対象の支出",
-                                            fontSize = 10.sp,
-                                            color = NotionTextSecondary,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = selectedTxForConsult!!.name,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
+                                            selectedTxForConsult!!.name,
                                             color = NotionTextPrimary,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            text = "¥${String.format(Locale.JAPAN, "%,d", selectedTxForConsult!!.amount)}",
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFFE57373)
+                                            text = "${selectedTxForConsult!!.category}・${SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(selectedTxForConsult!!.date))}",
+                                            color = NotionTextSecondary,
+                                            fontSize = 12.sp
                                         )
                                     }
+                                    Text(
+                                        text = "¥ ${String.format(Locale.JAPAN, "%,d", selectedTxForConsult!!.amount)}",
+                                        color = color,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
                                     Surface(
                                         onClick = { selectedTxForConsult = null },
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .size(20.dp),
+                                        modifier = Modifier.size(20.dp),
                                         shape = CircleShape,
-                                        color = NotionTextSecondary.copy(alpha = 0.2f)
+                                        color = NotionTextSecondary.copy(alpha = 0.15f)
                                     ) {
                                         Icon(Icons.Default.Close, null, tint = NotionTextSecondary, modifier = Modifier.padding(2.dp))
                                     }
@@ -733,7 +690,8 @@ fun ConsultationScreen(
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = NotionWhite,
+                    color = Color(0xFFF5F5F5),
+                    shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
                     border = BorderStroke(1.dp, NotionBorder.copy(alpha = 0.5f)),
                     tonalElevation = 0.dp
                 ) {
@@ -845,16 +803,19 @@ fun ConsultationScreen(
 
                                             // 選択された支出のコンテキスト
                                             if (tx != null) {
-                                                aiContextAdd += "\n【相談対象의 支出】\n名称: ${tx.name}\n金額: ¥${tx.amount}\nカテゴリ: ${tx.category}\n日付: ${SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN).format(Date(tx.date))}\n"
+                                                aiContextAdd += "\n【相談対象の支出】\n名称: ${tx.name}\n金額: ¥${tx.amount}\nカテゴリ: ${tx.category}\n日付: ${SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN).format(Date(tx.date))}\n"
                                                 if (finalUserMsg.isBlank()) finalUserMsg = "この支出について相談したいです。"
                                             }
 
                                             // ユーザーメッセージ表示用テキスト
                                             val displayUserMsg = buildString {
-                                                append(userMsgText)
+                                                if (userMsgText.isNotBlank()) append(userMsgText)
+                                                else if (tx != null) append("この支出について相談したいです。")
+                                                else if (imageUri != null) append("この画像について教えてください。")
+                                                
                                                 if (tx != null) {
                                                     if (isNotEmpty()) append("\n")
-                                                    append("支出「${tx.name}」(¥${String.format(Locale.JAPAN, "%,d", tx.amount)})")
+                                                    append("[TX_CARD:${tx.name}|${tx.amount}|${tx.category}|${tx.date}]")
                                                 }
                                                 if (imageUri != null) {
                                                     if (isNotEmpty()) append("\n")
@@ -890,9 +851,10 @@ fun ConsultationScreen(
                                             } else ""
 
                                             val fullPrompt = """
-                                                あなたは家計の専門家です。150文字以内で端的に回答してください。
+                                                あなたは家計の専門家です。ユーザーの質問に忠実に答え、150文字以内で端的に回答してください。
                                                 
                                                 【回答ルール】
+                                                ・ユーザーの質問に対して的確に回答し、求められた場合を除き資産状況の整理やサマリーは行わないでください。
                                                 ・「深掘りする問いかけ：」「問いかけ：」などのラベル表示は厳禁です。
                                                 ・自己紹介、精神論、タメ口は禁止です。
                                                 ・丁寧な言葉遣い（です・ます調）で、数字から言えることを伝えてください。
@@ -938,36 +900,48 @@ fun ConsultationScreen(
             Column(modifier = Modifier.fillMaxWidth().padding(bottom = 40.dp)) {
                 Text(
                     "相談する支出を選択",
-                    modifier = Modifier.padding(24.dp),
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = NotionTextPrimary
                 )
+                
                 val expenseList = transactions.filter { it.isExpense && !it.isTransfer }
                 if (expenseList.isEmpty()) {
                     Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
                         Text("支出の記録がありません", color = NotionTextSecondary)
                     }
                 } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
-                        items(expenseList.take(20)) { tx ->
-                            ListItem(
-                                headlineContent = { Text(tx.name, fontWeight = FontWeight.Bold) },
-                                supportingContent = { Text("${SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(tx.date))} • ${tx.category}") },
-                                trailingContent = { Text("¥${String.format(Locale.JAPAN, "%,d", tx.amount)}", fontWeight = FontWeight.Bold, color = Color(0xFFE57373)) },
-                                leadingContent = {
-                                    Box(
-                                        modifier = Modifier.size(40.dp).background(NotionBorder.copy(alpha = 0.3f), RoundedCornerShape(10.dp)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(getCategoryIcon(tx.category), null, tint = NotionTextSecondary, modifier = Modifier.size(20.dp))
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 20.dp)
+                            .background(Color.White, RoundedCornerShape(12.dp))
+                            .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(12.dp))
+                    ) {
+                        LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                            val items = expenseList.take(20)
+                            itemsIndexed(items) { index, tx ->
+                                AssetHistoryItem(
+                                    name = tx.name,
+                                    amount = "¥ ${String.format(Locale.JAPAN, "%,d", tx.amount)}",
+                                    memo = tx.category,
+                                    balanceAfter = SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(tx.date)),
+                                    color = Color(0xFFE57373),
+                                    icon = getCategoryIcon(tx.category),
+                                    onClick = {
+                                        selectedTxForConsult = tx
+                                        showTxPicker = false
                                     }
-                                },
-                                modifier = Modifier.clickable {
-                                    selectedTxForConsult = tx
-                                    showTxPicker = false
+                                )
+                                if (index < items.size - 1) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 16.dp),
+                                        thickness = 0.5.dp,
+                                        color = NotionBorder
+                                    )
                                 }
-                            )
+                            }
                         }
                     }
                 }
@@ -999,88 +973,122 @@ fun ChatHistoryDrawerContent(
         }
     }
 
-    ModalDrawerSheet(
+    Surface(
         modifier = Modifier
-            .width(280.dp)
-            .statusBarsPadding()
-            .navigationBarsPadding(),
-        drawerShape = RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp)
+            .fillMaxHeight()
+            .width(280.dp),
+        color = Color(0xFFF5F5F5),
+        shape = RectangleShape
     ) {
-        Spacer(Modifier.height(12.dp))
-        Text(
-            "履歴",
-            modifier = Modifier.padding(16.dp),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        NavigationDrawerItem(
-            label = { Text("新しいチャットを開始", fontWeight = FontWeight.Medium) },
-            selected = currentSessionId == null,
-            onClick = {
-                onSessionSelected(null)
-                scope.launch { drawerState.close() }
-            },
-            icon = { Icon(Icons.Default.Add, null) },
-            colors = NavigationDrawerItemDefaults.colors(
-                selectedContainerColor = NotionSafeGreen.copy(alpha = 0.1f),
-                selectedTextColor = NotionSafeGreen,
-                selectedIconColor = NotionSafeGreen
-            ),
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-        )
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp, horizontal = 16.dp), color = NotionBorder)
-        
-        LazyColumn(modifier = Modifier.weight(1f)) {
-            items(chatSessions) { session ->
-                val isSelected = currentSessionId == session.id
-                Surface(
-                    modifier = Modifier
-                        .padding(NavigationDrawerItemDefaults.ItemPadding)
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .clip(CircleShape)
-                        .combinedClickable(
-                            onClick = {
-                                onSessionSelected(session.id)
-                                scope.launch { drawerState.close() }
-                            },
-                            onLongClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                sessionToDelete = session
-                            }
-                        ),
-                    color = if (isSelected) NotionSafeGreen.copy(alpha = 0.1f) else Color.Transparent,
-                    contentColor = if (isSelected) NotionSafeGreen else NotionTextPrimary,
-                    shape = CircleShape
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+        Column(modifier = Modifier.fillMaxSize()) {
+            Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
+            
+            Spacer(Modifier.height(12.dp))
+            
+            Text(
+                "チャット",
+                modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = NotionTextSecondary,
+                fontWeight = FontWeight.Bold
+            )
+            
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(
+                    bottom = 16.dp,
+                    top = 4.dp
+                )
+            ) {
+                items(chatSessions) { session ->
+                    val isSelected = currentSessionId == session.id
+                    Surface(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        color = if (isSelected) Color(0xFFE0E0E0) else Color.White,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, if (isSelected) Color.Transparent else NotionBorder.copy(alpha = 0.8f))
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Chat,
-                            contentDescription = null,
-                            tint = if (isSelected) NotionSafeGreen else NotionTextSecondary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .combinedClickable(
+                                    onClick = {
+                                        onSessionSelected(session.id)
+                                        scope.launch { drawerState.close() }
+                                    },
+                                    onLongClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        sessionToDelete = session
+                                    }
+                                )
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
                             Text(
                                 text = session.title,
-                                style = MaterialTheme.typography.bodyLarge,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NotionTextPrimary,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = SimpleDateFormat("MM/dd HH:mm", Locale.JAPAN).format(Date(session.lastMessageAt)),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (isSelected) NotionSafeGreen.copy(alpha = 0.7f) else NotionTextSecondary
                             )
                         }
                     }
                 }
             }
+
+            // 下部に配置
+            // Dividerを薄く入れる
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = NotionBorder.copy(alpha = 0.5f))
+            
+            Spacer(Modifier.height(8.dp))
+
+            // 新しいチャット
+            Surface(
+                onClick = {
+                    onSessionSelected(null)
+                    scope.launch { drawerState.close() }
+                },
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .fillMaxWidth()
+                    .height(56.dp),
+                color = Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(Color.White, CircleShape)
+                            .border(1.dp, NotionBorder.copy(alpha = 0.8f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Edit,
+                            contentDescription = null,
+                            tint = NotionTextPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        "新しいチャット",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = NotionTextPrimary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+            
+            Spacer(Modifier.navigationBarsPadding())
+            Spacer(Modifier.height(8.dp))
         }
     }
 }

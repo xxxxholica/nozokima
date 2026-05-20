@@ -88,7 +88,7 @@ fun InputScreen(
     onExternalActivityLaunch: () -> Unit = {},
     onBack: () -> Unit = {},
 ) {
-    val modes = listOf("支出", "収入", "振替", "貸付", "回収")
+    val modes = listOf("収入", "支出", "振替", "貸付", "回収")
     var selectedMode by remember(initialRecovery, initialMode) { 
         mutableStateOf(
             when {
@@ -110,6 +110,8 @@ fun InputScreen(
     var showAssetSheet by remember { mutableStateOf(value = false) }
     var showToAssetSheet by remember { mutableStateOf(false) }
     var showCategorySheet by remember { mutableStateOf(false) }
+    var showTypeSheet by remember { mutableStateOf(false) }
+    var showPaymentMethodSheet by remember { mutableStateOf(false) }
     var showLendingSheet by remember { mutableStateOf(false) }
     var selectedDate by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var showDatePicker by remember { mutableStateOf(false) }
@@ -247,7 +249,7 @@ fun InputScreen(
                 val today = SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN).format(Date())
                 
                 val prompt = """
-                    あなたは家計簿の入力補助を行うAIです。提供されたレシートのテキストから、正確に金額、日付、支払元資産、カテゴリ、品目（メモ）を抽出してください。
+                    あなたは家計簿の入力補助を行うAIです。提供されたレシートのテキストから、正確に金額、日付、支払元資産、ジャンル、品目（メモ）を抽出してください。
                     
                     【レシートテキスト】
                     $fullText
@@ -255,14 +257,14 @@ fun InputScreen(
                     【支払元資産の候補】
                     $assetNames
                     
-                    【カテゴリの候補】
+                    【ジャンルの候補】
                     $categoryNames
                     
                     【抽出ルール】
                     1. 金額 (AMOUNT): 支払い合計金額を数値のみで。カンマは不要です。
                     2. 日付 (DATE): レシートに記載された日付を YYYY/MM/DD 形式で。記載がない場合は今日の日付 ($today) にしてください。
                     3. 資産 (ASSET): 候補リストの中から最も適切な支払元を選んでください。判断できない場合は「未選択」としてください。
-                    4. カテゴリ (CATEGORY): 候補リストの中から最も適切な支出カテゴリを「カテゴリの候補」の中から1つ選んでください。候補にない場合は「その他」としてください。
+                    4. ジャンル (GENRE): 候補リストの中から最も適切な支出ジャンルを「ジャンルの候補」の中から1つ選んでください。候補にない場合は「その他」としてください。
                     5. 品目 (MEMO): 店名や主要な購入品を20文字以内で簡潔に。
                     
                     【出力形式】
@@ -270,7 +272,7 @@ fun InputScreen(
                     AMOUNT: [数値]
                     DATE: [YYYY/MM/DD]
                     ASSET: [資産名]
-                    CATEGORY: [カテゴリ名]
+                    GENRE: [ジャンル名]
                     MEMO: [内容]
                 """.trimIndent()
 
@@ -301,8 +303,8 @@ fun InputScreen(
                                 }
                             }
                         }
-                        trimmed.startsWith("CATEGORY:") -> {
-                            val categoryName = trimmed.substringAfter("CATEGORY:").trim()
+                        trimmed.startsWith("GENRE:") -> {
+                            val categoryName = trimmed.substringAfter("GENRE:").trim()
                             val foundCategory = expenseCategories.find { it.name == categoryName }
                             if (foundCategory != null) {
                                 selectedCategory = foundCategory
@@ -602,7 +604,7 @@ fun InputScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             ScreenHeader(
-                title = "記録",
+                title = selectedMode,
                 navigationIcon = {
                     Surface(
                         onClick = onBack,
@@ -623,48 +625,6 @@ fun InputScreen(
                     .verticalScroll(scrollState)
             ) {
                 Spacer(modifier = Modifier.height(12.dp))
-
-                // セグメントコントロール (独立したブロック形式)
-                Row(
-                    modifier = Modifier
-                        .padding(horizontal = 24.dp)
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    modes.forEach { mode ->
-                        val isSelected = selectedMode == mode
-                        val modeColor = when (mode) {
-                            "支出" -> Color(0xFFD32F2F)
-                            "収入" -> NotionSafeGreen
-                            "振替" -> Color(0xFF1976D2)
-                            "貸付" -> Color(0xFFFB8C00)
-                            "回収" -> Color(0xFF00897B)
-                            else -> NotionTextPrimary
-                        }
-                        
-                        Surface(
-                            onClick = { selectedMode = mode },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isSelected) modeColor.copy(alpha = 0.12f) else Color.White,
-                            border = BorderStroke(1.dp, if (isSelected) modeColor else NotionBorder)
-                        ) {
-                            Box(
-                                modifier = Modifier.padding(vertical = 10.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = mode,
-                                    color = if (isSelected) modeColor else NotionTextSecondary,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
 
                 // 金額ボックス
                 Box(
@@ -774,7 +734,7 @@ fun InputScreen(
                                         }
                                     )
                                 }
-                                // 3列目と4列目の調整（カテゴリーメニューの幅と合わせるため）
+                                // 3列目と4列目の調整（ジャンルメニューの幅と合わせるため）
                                 Spacer(modifier = Modifier.weight(1f))
                                 Spacer(modifier = Modifier.weight(1f))
                             }
@@ -788,62 +748,82 @@ fun InputScreen(
                     modifier = Modifier.padding(horizontal = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    if (selectedMode == "回収") {
-                        InputTile(
-                            icon = Icons.AutoMirrored.Filled.List,
-                            label = "対象の貸付",
-                            value = selectedLending?.let { "${it.personName} (${it.memo.ifBlank { "無題" }})" } ?: "選択してください",
-                            onClick = { showLendingSheet = true },
-                            accentColor = accentColor,
-                            isPlaceholder = selectedLending == null
-                        )
-                        HorizontalDivider(thickness = 1.dp, color = NotionBorder, modifier = Modifier.padding(vertical = 4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        modes.forEach { mode ->
+                            val isSelected = selectedMode == mode
+                            val modeColor = when (mode) {
+                                "支出" -> Color(0xFFD32F2F)
+                                "収入" -> NotionSafeGreen
+                                "振替" -> Color(0xFF1976D2)
+                                "貸付" -> Color(0xFFFB8C00)
+                                "回収" -> Color(0xFF00897B)
+                                else -> NotionTextPrimary
+                            }
+                            
+                            val modeIcon = when (mode) {
+                                "収入" -> Icons.Default.ArrowDownward
+                                "支出" -> Icons.Default.ArrowUpward
+                                "振替" -> Icons.Default.SyncAlt
+                                "貸付" -> Icons.Default.FileUpload
+                                "回収" -> Icons.Default.FileDownload
+                                else -> Icons.Default.Category
+                            }
+                            
+                            Surface(
+                                onClick = { selectedMode = mode },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) modeColor.copy(alpha = 0.12f) else Color.White,
+                                border = BorderStroke(1.dp, if (isSelected) modeColor else NotionBorder)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 10.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = modeIcon,
+                                        contentDescription = null,
+                                        tint = if (isSelected) modeColor else NotionTextSecondary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = mode,
+                                        color = if (isSelected) modeColor else NotionTextSecondary,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
                     }
+
+                    HorizontalDivider(thickness = 1.dp, color = NotionBorder, modifier = Modifier.padding(vertical = 4.dp))
 
                     val isDetailEnabled = selectedMode != "回収" || selectedLending != null
                     val detailAlpha = if (isDetailEnabled) 1f else 0.5f
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "詳細情報",
-                            color = NotionTextPrimary.copy(alpha = detailAlpha),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(start = 4.dp)
-                        )
+                    Text(
+                        "詳細情報",
+                        color = NotionTextPrimary.copy(alpha = detailAlpha),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
 
-                        if (selectedMode == "支出") {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf("即時", "後払い", "固定費").forEach { type ->
-                                    val isSelected = selectedPaymentType == type
-                                    Surface(
-                                        onClick = { selectedPaymentType = type },
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = if (isSelected) accentColor else Color.White,
-                                        border = BorderStroke(1.dp, if (isSelected) accentColor else NotionBorder),
-                                        modifier = Modifier.height(28.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier.padding(horizontal = 10.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = type,
-                                                fontSize = 11.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                color = if (isSelected) Color.White else NotionTextSecondary
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    if (selectedMode == "支出") {
+                        InputTile(
+                            icon = Icons.Default.Payments,
+                            label = "支払方法",
+                            value = selectedPaymentType,
+                            onClick = { showPaymentMethodSheet = true },
+                            accentColor = accentColor,
+                            enabled = isDetailEnabled
+                        )
                     }
 
                     InputTile(
@@ -854,6 +834,52 @@ fun InputScreen(
                         accentColor = accentColor,
                         enabled = isDetailEnabled
                     )
+
+                    InputTile(
+                        icon = Icons.Default.AccountBalanceWallet,
+                        label = if (selectedMode == "貸付") "貸し出し元" else if (selectedMode == "回収") "受け取り先" else if (selectedMode == "振替") "振替元" else "資産",
+                        value = selectedAssetEntity?.name ?: "未選択",
+                        onClick = { showAssetSheet = true },
+                        accentColor = accentColor,
+                        isPlaceholder = selectedAssetEntity == null,
+                        enabled = isDetailEnabled
+                    )
+
+                    if (selectedMode == "振替") {
+                        InputTile(
+                            icon = Icons.AutoMirrored.Filled.CompareArrows,
+                            label = "振替先",
+                            value = selectedToAssetEntity?.name ?: "未選択",
+                            onClick = { showToAssetSheet = true },
+                            accentColor = accentColor,
+                            isPlaceholder = selectedToAssetEntity == null,
+                            enabled = isDetailEnabled
+                        )
+                    }
+
+                    if (selectedMode == "回収") {
+                        InputTile(
+                            icon = Icons.AutoMirrored.Filled.List,
+                            label = "対象の貸付",
+                            value = selectedLending?.let { "${it.personName} (${it.memo.ifBlank { "無題" }})" } ?: "選択してください",
+                            onClick = { showLendingSheet = true },
+                            accentColor = accentColor,
+                            isPlaceholder = selectedLending == null,
+                            enabled = isDetailEnabled
+                        )
+                    }
+
+                    if (selectedMode == "支出" || selectedMode == "収入") {
+                        InputTile(
+                            icon = selectedCategory?.icon ?: Icons.Outlined.Category,
+                            label = "ジャンル",
+                            value = selectedCategory?.name ?: "未選択",
+                            onClick = { showCategorySheet = true },
+                            accentColor = accentColor,
+                            isPlaceholder = selectedCategory == null,
+                            enabled = isDetailEnabled
+                        )
+                    }
 
                     // Memo Field
                     Surface(
@@ -915,18 +941,6 @@ fun InputScreen(
                         }
                     }
 
-                    if (selectedMode == "支出" || selectedMode == "収入") {
-                        InputTile(
-                            icon = selectedCategory?.icon ?: Icons.Outlined.Category,
-                            label = "カテゴリー",
-                            value = selectedCategory?.name ?: "未選択",
-                            onClick = { showCategorySheet = true },
-                            accentColor = accentColor,
-                            isPlaceholder = selectedCategory == null,
-                            enabled = isDetailEnabled
-                        )
-                    }
-                    
                     if (selectedMode == "貸付") {
                         Surface(
                             modifier = Modifier
@@ -974,28 +988,6 @@ fun InputScreen(
                                 }
                             }
                         }
-                    }
-
-                    InputTile(
-                        icon = Icons.Default.AccountBalanceWallet,
-                        label = if (selectedMode == "貸付") "貸し出し元" else if (selectedMode == "回収") "受け取り先" else if (selectedMode == "振替") "振替元" else "資産",
-                        value = selectedAssetEntity?.name ?: "未選択",
-                        onClick = { showAssetSheet = true },
-                        accentColor = accentColor,
-                        isPlaceholder = selectedAssetEntity == null,
-                        enabled = isDetailEnabled
-                    )
-
-                    if (selectedMode == "振替") {
-                        InputTile(
-                            icon = Icons.AutoMirrored.Filled.CompareArrows,
-                            label = "振替先",
-                            value = selectedToAssetEntity?.name ?: "未選択",
-                            onClick = { showToAssetSheet = true },
-                            accentColor = accentColor,
-                            isPlaceholder = selectedToAssetEntity == null,
-                            enabled = isDetailEnabled
-                        )
                     }
                 }
 
@@ -1095,6 +1087,93 @@ fun InputScreen(
             }
         }
 
+        if (showTypeSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showTypeSheet = false },
+                containerColor = Color.White,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
+                    Text("タイプを選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NotionTextPrimary)
+                    
+                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                        modes.chunked(4).forEach { rowItems ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                rowItems.forEach { mode ->
+                                    val isSelected = selectedMode == mode
+                                    val modeColor = when (mode) {
+                                        "支出" -> Color(0xFFD32F2F)
+                                        "収入" -> NotionSafeGreen
+                                        "振替" -> Color(0xFF1976D2)
+                                        "貸付" -> Color(0xFFFB8C00)
+                                        "回収" -> Color(0xFF00897B)
+                                        else -> NotionTextPrimary
+                                    }
+                                    val modeIcon = when (mode) {
+                                        "収入" -> Icons.Default.ArrowDownward
+                                        "支出" -> Icons.Default.ArrowUpward
+                                        "振替" -> Icons.Default.SyncAlt
+                                        "貸付" -> Icons.Default.FileUpload
+                                        "回収" -> Icons.Default.FileDownload
+                                        else -> Icons.Default.Category
+                                    }
+                                    
+                                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                        AssetCategoryTile(
+                                            label = mode,
+                                            icon = modeIcon,
+                                            color = if (isSelected) modeColor else NotionTextSecondary,
+                                            onClick = { 
+                                                selectedMode = mode
+                                                showTypeSheet = false 
+                                            }
+                                        )
+                                    }
+                                }
+                                repeat(4 - rowItems.size) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showPaymentMethodSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showPaymentMethodSheet = false },
+                containerColor = Color.White,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
+                    Text("支払方法を選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NotionTextPrimary)
+                    
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        listOf("即時", "後払い", "固定費").forEach { type ->
+                            val isSelected = selectedPaymentType == type
+                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                AssetCategoryTile(
+                                    label = type,
+                                    icon = when(type) {
+                                        "即時" -> Icons.Default.FlashOn
+                                        "後払い" -> Icons.Default.Schedule
+                                        else -> Icons.Default.Autorenew
+                                    },
+                                    color = if (isSelected) accentColor else NotionTextSecondary,
+                                    onClick = { 
+                                        selectedPaymentType = type
+                                        showPaymentMethodSheet = false 
+                                    }
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
         if (showCategorySheet) {
             ModalBottomSheet(
                 onDismissRequest = { showCategorySheet = false },
@@ -1102,7 +1181,7 @@ fun InputScreen(
                 dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
-                    Text("カテゴリーを選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NotionTextPrimary)
+                    Text("ジャンルを選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NotionTextPrimary)
                     
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         categories.chunked(4).forEach { rowItems ->

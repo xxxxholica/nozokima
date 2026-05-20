@@ -15,6 +15,8 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -37,7 +39,6 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.nozokima.model.*
 import com.example.nozokima.ui.components.*
 import com.example.nozokima.ui.screens.*
 import com.example.nozokima.util.*
@@ -46,11 +47,12 @@ import com.example.nozokima.data.manager.*
 import com.example.nozokima.ui.viewmodel.MainViewModel
 import com.example.nozokima.ui.viewmodel.HomeViewModel
 import com.example.nozokima.ui.viewmodel.ViewModelFactory
-import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.launch
 import ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.unit.IntOffset
 
 class MainActivity : FragmentActivity() {
     private val db by lazy { (application as NozokimaApplication).database }
@@ -123,11 +125,9 @@ class MainActivity : FragmentActivity() {
             val snackbarHostState = remember { SnackbarHostState() }
 
             var selectedTab by remember { mutableIntStateOf(0) }
-            var consultingTransaction by remember { mutableStateOf<Transaction?>(null) }
             var initialHomeAdviceText by remember { mutableStateOf<String?>(null) }
             var recoveryLending by remember { mutableStateOf<LendingEntity?>(null) }
             var initialInputMode by remember { mutableStateOf<String?>(null) }
-            var initialAssetCategoryFilter by remember { mutableStateOf<String?>(null) }
             var initialHistoryMode by remember { mutableStateOf(false) }
             var isGoalKeypadVisible by remember { mutableStateOf(value = false) }
 
@@ -189,75 +189,6 @@ class MainActivity : FragmentActivity() {
 
             LaunchedEffect(Unit) {
                 mainViewModel.checkAiStatus()
-            }
-
-            // デフォルトカテゴリと資産の初期化
-            LaunchedEffect(Unit) {
-                scope.launch {
-                    if (dao.getAppSettingsSync() == null) {
-                        dao.upsertAppSettings(AppSettingsEntity())
-                    }
-                    if (dao.getCategoryCount() == 0) {
-                        val defaultCategories = listOf(
-                            CategoryEntity(UUID.randomUUID().toString(), "食生活", "EXPENSE", "Restaurant", true, 0),
-                            CategoryEntity(UUID.randomUUID().toString(), "住まい", "EXPENSE", "Home", true, 1),
-                            CategoryEntity(UUID.randomUUID().toString(), "インフラ", "EXPENSE", "Wifi", true, 2),
-                            CategoryEntity(UUID.randomUUID().toString(), "日用雑貨", "EXPENSE", "LocalMall", true, 3),
-                            CategoryEntity(UUID.randomUUID().toString(), "移動・交通", "EXPENSE", "Place", true, 4),
-                            CategoryEntity(UUID.randomUUID().toString(), "健康・医療", "EXPENSE", "MedicalServices", true, 5),
-                            CategoryEntity(UUID.randomUUID().toString(), "自分磨き", "EXPENSE", "School", true, 6),
-                            CategoryEntity(UUID.randomUUID().toString(), "レジャー", "EXPENSE", "Star", true, 7),
-                            CategoryEntity(UUID.randomUUID().toString(), "交際・贈答", "EXPENSE", "Favorite", true, 8),
-                            CategoryEntity(UUID.randomUUID().toString(), "美容・装い", "EXPENSE", "Face", true, 9),
-                            CategoryEntity(UUID.randomUUID().toString(), "特別な支出", "EXPENSE", "CardGiftcard", true, 10),
-                            CategoryEntity(UUID.randomUUID().toString(), "その他", "EXPENSE", "MoreHoriz", true, 11),
-                            CategoryEntity(UUID.randomUUID().toString(), "給与", "INCOME", "AccountBalance", true, 12),
-                            CategoryEntity(UUID.randomUUID().toString(), "事業・副業", "INCOME", "Build", true, 13),
-                            CategoryEntity(UUID.randomUUID().toString(), "資産運用", "INCOME", "Savings", true, 14),
-                            CategoryEntity(UUID.randomUUID().toString(), "臨時収入", "INCOME", "Star", true, 15),
-                            CategoryEntity(UUID.randomUUID().toString(), "給付・手当", "INCOME", "Info", true, 16),
-                            CategoryEntity(UUID.randomUUID().toString(), "還付・返金", "INCOME", "Refresh", true, 17),
-                            CategoryEntity(UUID.randomUUID().toString(), "贈与・祝金", "INCOME", "Favorite", true, 18),
-                            CategoryEntity(UUID.randomUUID().toString(), "ポイ活", "INCOME", "Payments", true, 19),
-                            CategoryEntity(UUID.randomUUID().toString(), "不用品売却", "INCOME", "LocalMall", true, 20),
-                            CategoryEntity(UUID.randomUUID().toString(), "繰越金", "INCOME", "History", true, 21),
-                            CategoryEntity(UUID.randomUUID().toString(), "利息・配当", "INCOME", "ShowChart", true, 22),
-                            CategoryEntity(UUID.randomUUID().toString(), "その他", "INCOME", "MoreHoriz", true, 23)
-                        )
-                        defaultCategories.forEach { dao.insertCategory(it) }
-                    }
-                    if (dao.getAllAssetsList().isEmpty()) {
-                        val now = System.currentTimeMillis()
-                        val defaultAssets = listOf(
-                            AssetEntity(UUID.randomUUID().toString(), "現金", 0, "現金", now),
-                            AssetEntity(UUID.randomUUID().toString(), "銀行", 0, "銀行", now),
-                            AssetEntity(UUID.randomUUID().toString(), "電子マネー", 0, "電子マネー", now),
-                            AssetEntity(UUID.randomUUID().toString(), "カード", 0, "カード", now)
-                        )
-                        defaultAssets.forEach { dao.insertAsset(it) }
-                    }
-                }
-            }
-
-            if (mainUiState.aiStatus == FeatureStatus.DOWNLOADABLE) {
-                AlertDialog(
-                    onDismissRequest = {},
-                    title = { Text("追加のダウンロード") },
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("AI相談の利用にはAIモデル(Gemini Nano)が必要です。\nダウンロードはWi-Fi 接続を推奨します。", fontSize = 14.sp)
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { mainViewModel.startAiDownload() }) { Text("ダウンロード開始") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = {}) { Text("キャンセル") }
-                    }
-                )
-            }
-
-            LaunchedEffect(mainUiState.chatSessions) {
             }
 
             val activity = LocalContext.current as? android.app.Activity
@@ -567,175 +498,203 @@ class MainActivity : FragmentActivity() {
                     )
                 } else {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        ModalNavigationDrawer(
-                        drawerState = drawerState,
-                        gesturesEnabled = selectedTab == 3,
-                        drawerContent = {
-                            if (selectedTab == 3) {
-                                ChatHistoryDrawerContent(
-                                    chatSessions = mainUiState.chatSessions,
-                                    currentSessionId = currentChatSessionId,
-                                    onSessionSelected = { currentChatSessionId = it },
-                                    onDeleteSession = { sessionId ->
-                                        scope.launch {
-                                            dao.deleteChatSession(sessionId)
-                                            dao.deleteMessagesForSession(sessionId)
-                                            if (currentChatSessionId == sessionId) currentChatSessionId = null
-                                        }
+                        Scaffold(
+                            contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
+                        ) { innerPadding ->
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                AnimatedContent(
+                                    targetState = selectedTab,
+                                    transitionSpec = {
+                                        if (targetState > initialState) {
+                                            (slideInHorizontally { it } + fadeIn()).togetherWith(slideOutHorizontally { -it } + fadeOut())
+                                        } else {
+                                            (slideInHorizontally { -it } + fadeIn()).togetherWith(slideOutHorizontally { it } + fadeOut())
+                                        }.using(SizeTransform(clip = false))
                                     },
-                                    drawerState = drawerState,
-                                    scope = scope
-                                )
-                            }
-                        }
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            Scaffold(
-                                contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
-                            ) { innerPadding ->
-                                Box(modifier = Modifier.fillMaxSize()) {
-                                    AnimatedContent(
-                                        targetState = selectedTab,
-                                        transitionSpec = {
-                                            if (targetState > initialState) {
-                                                (slideInHorizontally { it } + fadeIn()).togetherWith(slideOutHorizontally { -it } + fadeOut())
-                                            } else {
-                                                (slideInHorizontally { -it } + fadeIn()).togetherWith(slideOutHorizontally { it } + fadeOut())
-                                            }.using(SizeTransform(clip = false))
-                                        },
-                                        label = "MainTabTransition"
-                                    ) { targetTab ->
-                                        when (targetTab) {
-                                            0 -> Box(Modifier.padding(innerPadding)) {
-                                                HomeScreen(
-                                                    viewModel = homeViewModel,
-                                                    dao = dao,
-                                                    onInputClick = { mode ->
-                                                        initialInputMode = mode
-                                                        selectedTab = 1
-                                                    },
-                                                    onConsultClick = { 
-                                                        selectedTab = 3 
-                                                    },
-                                                    onAiAdviceClick = { advice ->
-                                                        initialHomeAdviceText = advice
-                                                        selectedTab = 3
-                                                    },
-                                                    onAssetsClick = { 
-                                                        initialHistoryMode = false
-                                                        selectedTab = 2 
-                                                    },
-                                                    onHistoryClick = {
-                                                        initialHistoryMode = true
-                                                        selectedTab = 2
-                                                    },
-                                                    onGoalClick = { selectedTab = 6 },
-                                                    onSettingsClick = { selectedTab = 4 }
-                                                )
-                                            }
-                                            1 -> Box(Modifier.padding(innerPadding)) {
-                                                InputScreen(
-                                                    dao = dao, gemini = gemini, ocrManager = ocrManager,
-                                                    initialRecovery = recoveryLending,
-                                                    initialMode = initialInputMode,
-                                                    onRecoveryHandled = { 
-                                                        recoveryLending = null
-                                                        initialInputMode = null
-                                                    },
-                                                    onExternalActivityLaunch = { isExternalActivityLaunching = true },
-                                                    onBack = { selectedTab = 0 }
-                                                )
-                                            }
-                                            2 -> Box(Modifier.padding(innerPadding)) {
-                                                AssetsScreen(
-                                                    dao = dao,
-                                                    onRecoverClick = { lending ->
-                                                        recoveryLending = lending
-                                                        selectedTab = 1
-                                                    },
-                                                    initialCategoryFilter = initialAssetCategoryFilter,
-                                                    initialHistoryMode = initialHistoryMode,
-                                                    onBack = { 
-                                                        initialHistoryMode = false
-                                                        selectedTab = 0 
-                                                    }
-                                                )
-                                            }
-                                            3 -> {
-                                                ConsultationScreen(
-                                                    dao = dao, gemini = gemini,
-                                                    ocrManager = ocrManager,
-                                                    assets = homeViewModel.uiState.collectAsState().value.assets,
-                                                    lendings = homeViewModel.uiState.collectAsState().value.lendings,
-                                                    transactions = homeViewModel.uiState.collectAsState().value.transactions,
-                                                    chatSessions = mainUiState.chatSessions,
-                                                    drawerState = drawerState,
-                                                    currentSessionId = currentChatSessionId,
-                                                    onSessionSelected = { currentChatSessionId = it },
-                                                    initialTransaction = consultingTransaction,
-                                                    onClearConsultation = { consultingTransaction = null },
-                                                    initialHomeAdviceText = initialHomeAdviceText,
-                                                    onClearHomeAdvice = { initialHomeAdviceText = null },
-                                                    onBack = { selectedTab = 0 },
-                                                    modifier = Modifier.fillMaxSize().padding(top = innerPadding.calculateTopPadding()).consumeWindowInsets(innerPadding)
-                                                )
-                                            }
-                                            4 -> Box(Modifier.padding(innerPadding)) {
-                                                GeneralSettingsScreen(
-                                                    appLockEnabled = appSettings.isAppLockEnabled,
-                                                    onToggleAppLock = { enabled ->
-                                                        appLockDialogMode = if (enabled) "set" else "disable"
-                                                        showAppLockPasswordDialog = true
-                                                    },
-                                                    biometricEnabled = appSettings.isBiometricEnabled,
-                                                    onToggleBiometric = { enabled ->
-                                                        scope.launch {
-                                                            dao.upsertAppSettings(appSettings.copy(isBiometricEnabled = enabled))
+                                    label = "MainTabTransition"
+                                ) { targetTab ->
+                                    when (targetTab) {
+                                        0 -> Box(Modifier.padding(innerPadding)) {
+                                                            HomeScreen(
+                                                                viewModel = homeViewModel,
+                                                                dao = dao,
+                                                                onInputClick = { mode ->
+                                                                    initialInputMode = mode
+                                                                    selectedTab = 1
+                                                                },
+                                                                onConsultClick = { 
+                                                                    selectedTab = 3 
+                                                                },
+                                                                onAiAdviceClick = { advice ->
+                                                                    initialHomeAdviceText = advice
+                                                                    selectedTab = 3
+                                                                },
+                                                                onAssetsClick = { 
+                                                                    initialHistoryMode = false
+                                                                    selectedTab = 2 
+                                                                },
+                                                                onHistoryClick = {
+                                                                    initialHistoryMode = true
+                                                                    selectedTab = 2
+                                                                },
+                                                                onGoalClick = { selectedTab = 6 },
+                                                                onSettingsClick = { selectedTab = 4 }
+                                                            )
                                                         }
-                                                    },
-                                                    isBiometricAvailable = isBiometricAvailable(),
-                                                    onChangePassword = {
-                                                        appLockDialogMode = "change"
-                                                        showAppLockPasswordDialog = true
-                                                    },
-                                                    onExportClick = {
-                                                        backupMode = "export"
-                                                        showBackupPasswordDialog = true
-                                                    },
-                                                    onImportClick = { importLauncher.launch(arrayOf("*/*")) },
-                                                    onCategoryManagementClick = { selectedTab = 5 },
-                                                    onBack = { selectedTab = 0 }
-                                                )
+                                                        1 -> Box(Modifier.padding(innerPadding)) {
+                                                            InputScreen(
+                                                                dao = dao, gemini = gemini, ocrManager = ocrManager,
+                                                                initialRecovery = recoveryLending,
+                                                                initialMode = initialInputMode,
+                                                                onRecoveryHandled = { 
+                                                                    recoveryLending = null
+                                                                    initialInputMode = null
+                                                                },
+                                                                onExternalActivityLaunch = { isExternalActivityLaunching = true },
+                                                                onBack = { selectedTab = 0 }
+                                                            )
+                                                        }
+                                                        2 -> Box(Modifier.padding(innerPadding)) {
+                                                            AssetsScreen(
+                                                                dao = dao,
+                                                                onRecoverClick = { lending ->
+                                                                    recoveryLending = lending
+                                                                    selectedTab = 1
+                                                                },
+                                                                initialHistoryMode = initialHistoryMode,
+                                                                onBack = { 
+                                                                    initialHistoryMode = false
+                                                                    selectedTab = 0 
+                                                                }
+                                                            )
+                                                        }
+                                                        3 -> {
+                                                            val drawerWidth = 280.dp
+                                                            val drawerWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { drawerWidth.toPx() }
+                                                            val drawerExpanded by animateFloatAsState(
+                                                                targetValue = if (drawerState.isOpen) 1f else 0f,
+                                                                label = "DrawerAnimation"
+                                                            )
+
+                                                            Box(modifier = Modifier.fillMaxSize()) {
+                                                                // メインコンテンツ (ConsultationScreen) を左に押し出す
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .fillMaxSize()
+                                                                        .offset { IntOffset(x = (-drawerWidthPx * drawerExpanded).toInt(), y = 0) }
+                                                                ) {
+                                                                    ConsultationScreen(
+                                                                        dao = dao, gemini = gemini,
+                                                                        ocrManager = ocrManager,
+                                                                        assets = homeViewModel.uiState.collectAsState().value.assets,
+                                                                        lendings = homeViewModel.uiState.collectAsState().value.lendings,
+                                                                        transactions = homeViewModel.uiState.collectAsState().value.transactions,
+                                                                        chatSessions = mainUiState.chatSessions,
+                                                                        drawerState = drawerState,
+                                                                        currentSessionId = currentChatSessionId,
+                                                                        onSessionSelected = { currentChatSessionId = it },
+                                                                        initialHomeAdviceText = initialHomeAdviceText,
+                                                                        onClearHomeAdvice = { initialHomeAdviceText = null },
+                                                                        onBack = { selectedTab = 0 },
+                                                                        modifier = Modifier.fillMaxSize()
+                                                                    )
+                                                                }
+
+                                                                // 右側からスライドインするドロワー
+                                                                if (drawerExpanded > 0f) {
+                                                                    // 背景の薄暗い部分（スクリム）
+                                                                    Box(
+                                                                        modifier = Modifier
+                                                                            .fillMaxSize()
+                                                                            .background(Color.Black.copy(alpha = 0.3f * drawerExpanded))
+                                                                            .clickable(
+                                                                                interactionSource = remember { MutableInteractionSource() },
+                                                                                indication = null
+                                                                            ) {
+                                                                                scope.launch { drawerState.close() }
+                                                                            }
+                                                                    )
+
+                                                                    Box(
+                                                                        modifier = Modifier
+                                                                            .width(drawerWidth)
+                                                                            .fillMaxHeight()
+                                                                            .align(Alignment.CenterEnd)
+                                                                            .offset { IntOffset(x = (drawerWidthPx * (1f - drawerExpanded)).toInt(), y = 0) }
+                                                                            .background(Color(0xFFF5F5F5))
+                                                                    ) {
+                                                                        ChatHistoryDrawerContent(
+                                                                            chatSessions = mainUiState.chatSessions,
+                                                                            currentSessionId = currentChatSessionId,
+                                                                            onSessionSelected = { currentChatSessionId = it },
+                                                                            onDeleteSession = { sessionId ->
+                                                                                scope.launch {
+                                                                                    dao.deleteChatSession(sessionId)
+                                                                                    dao.deleteMessagesForSession(sessionId)
+                                                                                    if (currentChatSessionId == sessionId) currentChatSessionId = null
+                                                                                }
+                                                                            },
+                                                                            drawerState = drawerState,
+                                                                            scope = scope
+                                                                        )
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        4 -> Box(Modifier.padding(innerPadding)) {
+                                                            GeneralSettingsScreen(
+                                                                appLockEnabled = appSettings.isAppLockEnabled,
+                                                                onToggleAppLock = { enabled ->
+                                                                    appLockDialogMode = if (enabled) "set" else "disable"
+                                                                    showAppLockPasswordDialog = true
+                                                                },
+                                                                biometricEnabled = appSettings.isBiometricEnabled,
+                                                                onToggleBiometric = { enabled ->
+                                                                    scope.launch {
+                                                                        dao.upsertAppSettings(appSettings.copy(isBiometricEnabled = enabled))
+                                                                    }
+                                                                },
+                                                                isBiometricAvailable = isBiometricAvailable(),
+                                                                onChangePassword = {
+                                                                    appLockDialogMode = "change"
+                                                                    showAppLockPasswordDialog = true
+                                                                },
+                                                                onExportClick = {
+                                                                    backupMode = "export"
+                                                                    showBackupPasswordDialog = true
+                                                                },
+                                                                onImportClick = { importLauncher.launch(arrayOf("*/*")) },
+                                                                onCategoryManagementClick = { selectedTab = 5 },
+                                                                onBack = { selectedTab = 0 }
+                                                            )
+                                                        }
+                                                        5 -> Box(Modifier.padding(innerPadding)) {
+                                                            CategoryManagementScreen(dao = dao, onBack = { selectedTab = 4 })
+                                                        }
+                                                        6 -> Box(Modifier.padding(innerPadding)) {
+                                                            GoalSettingContent(
+                                                                dao = dao,
+                                                                aiStatus = homeUiState.aiStatus,
+                                                                aiIsReady = homeUiState.isAiReady,
+                                                                aiIsGenerating = homeUiState.isAiGenerating,
+                                                                aiIsChecking = homeUiState.isAiCheckingStatus,
+                                                                aiIsInitialized = homeUiState.isAiInitialized,
+                                                                goalAiText = homeUiState.goalAiText,
+                                                                onRefreshAi = { homeViewModel.triggerGoalAnalysis() },
+                                                                isKeypadVisible = isGoalKeypadVisible,
+                                                                onKeypadVisibilityChange = { isGoalKeypadVisible = it },
+                                                                onBack = { selectedTab = 0 }
+                                                            )
+                                                        }
+                                                    }
+                                                }
                                             }
-                                            5 -> Box(Modifier.padding(innerPadding)) {
-                                                CategoryManagementScreen(dao = dao, onBack = { selectedTab = 4 })
-                                            }
-                                            6 -> Box(Modifier.padding(innerPadding)) {
-                                                GoalSettingContent(
-                                                    dao = dao,
-                                                    aiStatus = homeUiState.aiStatus,
-                                                    aiIsReady = homeUiState.isAiReady,
-                                                    aiIsGenerating = homeUiState.isAiGenerating,
-                                                    aiIsChecking = homeUiState.isAiCheckingStatus,
-                                                    aiIsInitialized = homeUiState.isAiInitialized,
-                                                    goalAiText = homeUiState.goalAiText,
-                                                    onRefreshAi = { homeViewModel.triggerGoalAnalysis() },
-                                                    isKeypadVisible = isGoalKeypadVisible,
-                                                    onKeypadVisibilityChange = { isGoalKeypadVisible = it },
-                                                    onBack = { selectedTab = 0 }
-                                                )
-                                            }
+                                            
+                                            SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
                                         }
                                     }
-                                }
-                            }
-                            
-                            SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
-                        }
-                    }
                 }
             }
         }
     }
-}
 }

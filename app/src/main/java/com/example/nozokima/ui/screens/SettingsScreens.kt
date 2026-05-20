@@ -97,8 +97,8 @@ fun GeneralSettingsScreen(
                 SettingsSection(title = "カスタマイズ") {
                     SettingsItem(
                         icon = Icons.Default.Category,
-                        title = "カテゴリ管理",
-                        description = "収支カテゴリの追加・編集・並べ替え",
+                        title = "ジャンル管理",
+                        description = "収支ジャンルの追加・編集・並べ替え",
                         onClick = onCategoryManagementClick
                     )
                 }
@@ -302,7 +302,7 @@ fun CategoryListScreen(
             .background(NotionBackground)
     ) {
         ScreenHeader(
-            title = "カテゴリ管理",
+            title = "ジャンル管理",
             titleStyle = androidx.compose.ui.text.TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold),
             navigationIcon = {
                 Surface(
@@ -431,7 +431,7 @@ fun CategoryEditScreen(
             .background(NotionBackground)
     ) {
         ScreenHeader(
-            title = if (category == null) "カテゴリ追加" else "カテゴリ編集",
+            title = if (category == null) "ジャンル追加" else "ジャンル編集",
             titleStyle = androidx.compose.ui.text.TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold),
             navigationIcon = {
                 Surface(
@@ -504,7 +504,7 @@ fun CategoryEditScreen(
                 border = BorderStroke(1.dp, NotionBorder)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("カテゴリの名称", fontSize = 12.sp, color = NotionTextSecondary)
+                    Text("ジャンルの名称", fontSize = 12.sp, color = NotionTextSecondary)
                     androidx.compose.foundation.text.BasicTextField(
                         value = nameText,
                         onValueChange = { nameText = it },

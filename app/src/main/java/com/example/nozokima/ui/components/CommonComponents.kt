@@ -42,6 +42,8 @@ fun ScreenHeader(
         fontWeight = FontWeight.Bold,
         letterSpacing = (-0.5).sp
     ),
+    titleMaxLines: Int = Int.MAX_VALUE,
+    titleOverflow: TextOverflow = TextOverflow.Clip,
     trailingContent: @Composable (() -> Unit)? = null
 ) {
     Row(
@@ -60,7 +62,9 @@ fun ScreenHeader(
             text = title,
             color = NotionTextPrimary,
             style = titleStyle,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f),
+            maxLines = titleMaxLines,
+            overflow = titleOverflow
         )
         if (trailingContent != null) trailingContent()
     }
@@ -131,14 +135,15 @@ fun AssetHistoryItem(
     balanceAfter: String,
     color: Color,
     icon: ImageVector = Icons.Default.MoreHoriz,
-    onLongClick: () -> Unit
+    onClick: () -> Unit = {},
+    onLongClick: () -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
-                onClick = {},
+                onClick = onClick,
                 onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLongClick() }
             )
             .padding(horizontal = 16.dp, vertical = 14.dp),

@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.nozokima.data.local.FinanceDao
 import com.example.nozokima.data.local.entities.*
+import com.example.nozokima.ui.components.getCategoryIcon
 import com.example.nozokima.ui.viewmodel.HomeViewModel
 import com.example.nozokima.ui.viewmodel.HomeUiState
 import com.google.mlkit.genai.common.FeatureStatus
@@ -710,30 +711,4 @@ fun QuickAccessItem(
     }
 }
 
-fun getCategoryIcon(category: String) = when(category) {
-    "食生活" -> Icons.Default.Restaurant
-    "住まい" -> Icons.Default.Home
-    "インフラ" -> Icons.Default.Wifi
-    "日用雑貨" -> Icons.Default.LocalMall
-    "移動・交通" -> Icons.Default.Place
-    "健康・医療" -> Icons.Default.MedicalServices
-    "自分磨き" -> Icons.Default.School
-    "レジャー" -> Icons.Default.Star
-    "交際・贈答" -> Icons.Default.Favorite
-    "美容・装い" -> Icons.Default.Face
-    "特別な支出" -> Icons.Default.CardGiftcard
-    "給与" -> Icons.Default.AccountBalance
-    "事業・副業" -> Icons.Default.Build
-    "資産運用" -> Icons.Default.Savings
-    "臨時収入" -> Icons.Default.Star
-    "給付・手当" -> Icons.Default.Info
-    "還付・返金" -> Icons.Default.Refresh
-    "贈与・祝金" -> Icons.Default.Favorite
-    "ポイ活" -> Icons.Default.Payments
-    "不用品売却" -> Icons.Default.LocalMall
-    "繰越金" -> Icons.Default.History
-    "利息・配当" -> Icons.Default.ShowChart
-    "貸付" -> Icons.Outlined.RequestPage
-    "回収" -> Icons.Default.Handshake
-    else -> Icons.Default.MoreHoriz
-}
+
