@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -77,6 +78,7 @@ fun ConsultationScreen(
     onClearConsultation: () -> Unit = {},
     initialHomeAdviceText: String? = null,
     onClearHomeAdvice: () -> Unit = {},
+    onBack: () -> Unit = {},
 ) {
     var inputText by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
@@ -317,7 +319,13 @@ fun ConsultationScreen(
     }
 
     // キーボードが表示されたときも最下部にスクロール
-    val isKeyboardVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val ime = WindowInsets.ime
+    val isKeyboardVisible by remember {
+        derivedStateOf {
+            ime.getBottom(density) > 0
+        }
+    }
     LaunchedEffect(isKeyboardVisible) {
         if (isKeyboardVisible && messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -333,6 +341,9 @@ fun ConsultationScreen(
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
+            }
             IconButton(onClick = { scope.launch { drawerState.open() } }) {
                 Icon(Icons.Default.Menu, contentDescription = "メニュー")
             }
@@ -599,7 +610,6 @@ fun ConsultationScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 24.dp, end = 24.dp, top = 2.dp, bottom = 0.dp)
-                .imePadding()
                 .alpha(if (isAvailable) 1f else 0.5f)
         ) {
             Surface(

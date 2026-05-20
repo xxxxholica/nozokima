@@ -8,6 +8,7 @@ import com.example.nozokima.data.local.entities.TransactionEntity
 import com.example.nozokima.data.local.entities.AssetEntity
 import com.example.nozokima.data.local.entities.LendingEntity
 import com.example.nozokima.data.local.entities.BudgetEntity
+import com.example.nozokima.data.local.entities.ScheduledExpenseEntity
 import com.example.nozokima.data.manager.GeminiNanoModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -18,6 +19,7 @@ data class HomeUiState(
     val assets: List<AssetEntity> = emptyList(),
     val lendings: List<LendingEntity> = emptyList(),
     val budgets: List<BudgetEntity> = emptyList(),
+    val scheduledExpenses: List<ScheduledExpenseEntity> = emptyList(),
     val goalSetting: GoalSettingEntity? = null,
     val homeAiText: String = "",
     val goalAiText: String = "",
@@ -42,6 +44,7 @@ class HomeViewModel(
         dao.getAllLendings(),
         dao.getAllBudgets(),
         dao.getGoalSetting(),
+        dao.getAllScheduledExpenses(),
         _homeAiText.asStateFlow(),
         _goalAiText.asStateFlow(),
         gemini.isGenerating,
@@ -59,13 +62,15 @@ class HomeViewModel(
         @Suppress("UNCHECKED_CAST")
         val budgets = params[3] as List<BudgetEntity>
         val goalSetting = params[4] as GoalSettingEntity?
-        val homeAiText = params[5] as String
-        val goalAiText = params[6] as String
-        val isGenerating = params[7] as Boolean
-        val aiStatus = params[8] as Int
-        val isAiReady = params[9] as Boolean
-        val isAiChecking = params[10] as Boolean
-        val isAiInitialized = params[11] as Boolean
+        @Suppress("UNCHECKED_CAST")
+        val scheduledExpenses = params[5] as List<ScheduledExpenseEntity>
+        val homeAiText = params[6] as String
+        val goalAiText = params[7] as String
+        val isGenerating = params[8] as Boolean
+        val aiStatus = params[9] as Int
+        val isAiReady = params[10] as Boolean
+        val isAiChecking = params[11] as Boolean
+        val isAiInitialized = params[12] as Boolean
 
         HomeUiState(
             transactions = transactions,
@@ -73,6 +78,7 @@ class HomeViewModel(
             lendings = lendings,
             budgets = budgets,
             goalSetting = goalSetting,
+            scheduledExpenses = scheduledExpenses,
             homeAiText = homeAiText,
             goalAiText = goalAiText,
             isAiGenerating = isGenerating,
@@ -94,6 +100,8 @@ class HomeViewModel(
         // データの計算 (in background via Flow combination or here if needed immediately)
         val totalLendingAmount = state.lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
         val currentAssets = state.assets.sumOf { it.amount } + totalLendingAmount
+        val upcomingTotal = state.scheduledExpenses.filter { !it.isCompleted }.sumOf { it.amount }
+        val virtualBalance = currentAssets - upcomingTotal
 
         val calendar = Calendar.getInstance().apply {
             set(Calendar.DAY_OF_MONTH, 1)
@@ -114,32 +122,34 @@ class HomeViewModel(
             val remainingDays = ((currentGoal.targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
             val remainingMonths = (remainingDays / 30.0).coerceAtLeast(0.1)
             val totalExpectedIncome = (currentGoal.monthlyIncome * remainingMonths).toLong()
-            val totalSpendable = (currentAssets + totalExpectedIncome - currentGoal.targetAmount).coerceAtLeast(0L)
+            val totalSpendable = (virtualBalance + totalExpectedIncome - currentGoal.targetAmount).coerceAtLeast(0L)
             if (remainingMonths > 0) (totalSpendable / remainingMonths).toLong() else 0L
         } else null
         val monthlyBudget = goalMonthlyBudget ?: defaultBudget
 
         val hasGoal = currentGoal != null && currentGoal.targetAmount > 0 && currentGoal.showResults
-        val goalProgressRatio = if (hasGoal) (currentAssets.toFloat() / currentGoal.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
+        val goalProgressRatio = if (hasGoal) (virtualBalance.toFloat() / currentGoal.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
+
+        val latestExpense = state.transactions.asSequence().filter { it.isExpense && it.category != "貸付" }.maxByOrNull { it.date }
 
         val prompt = buildString {
             appendLine("あなたは丁寧で実利的な家計の相棒です。")
-            appendLine("以下のデータをもとに、現状の分析とアドバイスを返してください。")
+            if (latestExpense != null) {
+                appendLine("最新の支出（${latestExpense.name}: ¥${String.format(Locale.JAPAN, "%,d", latestExpense.amount)}）を踏まえ、短く鋭いアドバイスを1つだけ返してください。")
+            } else {
+                appendLine("現在の資産状況を踏まえ、短く鋭いアドバイスを1つだけ返してください。")
+            }
             appendLine("【出力ルール】")
-            appendLine("・求められているものを端的に回答してください。")
-            appendLine("・120文字以内の簡潔な1〜2文でまとめてください。")
-            appendLine("・「深掘りする問いかけ：」「問いかけ：」などの見出し、ラベル、記号は一切含めないでください。")
-            appendLine("・最後に必ず、本文の最後の一文として自然に深掘りのための問いかけを添えてください。")
-            appendLine("【禁止事項】自己紹介、挨拶、タメ口、精神論、回答方針への言及、「深掘りする問いかけ」という言葉自体の使用")
-            appendLine("丁寧な言葉遣い（です・ます調）を守り、数字に基づく具体的な指摘を端的に伝えてください。")
+            appendLine("・60文字以内の簡潔な1文で回答してください。")
+            appendLine("・「深掘りする問いかけ：」などの見出しは一切含めないでください。")
+            appendLine("・最後に必ず、本文の一部として自然な質問を一文添えてください。")
+            appendLine("【禁止事項】自己紹介、挨拶、タメ口、精神論、長文、複数の指摘")
+            appendLine("丁寧な言葉遣い（です・ます調）で、最も重要な1点に絞って伝えてください。")
             appendLine()
-            appendLine("今月の支出: ¥${String.format(Locale.JAPAN, "%,d", spentThisMonth)}")
+            appendLine("今月の支出合計: ¥${String.format(Locale.JAPAN, "%,d", spentThisMonth)}")
             appendLine("月の予算: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
-            appendLine("予算消化率: ${if (monthlyBudget > 0) "${(spentThisMonth.toFloat() / monthlyBudget * 100).toInt()}%" else "不明"}")
-            appendLine("総資産: ¥${String.format(Locale.JAPAN, "%,d", currentAssets)}")
+            appendLine("自由に使える残高: ¥${String.format(Locale.JAPAN, "%,d", virtualBalance)}")
             if (hasGoal) appendLine("貯金目標: ¥${String.format(Locale.JAPAN, "%,d", currentGoal.targetAmount)}（達成率${(goalProgressRatio * 100).toInt()}%）")
-            val recentCats = state.transactions.take(5).joinToString("、") { it.category }
-            if (recentCats.isNotEmpty()) appendLine("直近の支出カテゴリ: $recentCats")
         }
 
         _homeAiText.value = "" 
@@ -164,14 +174,16 @@ class HomeViewModel(
 
         val totalLendingAmount = state.lendings.filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
         val currentAssets = state.assets.sumOf { it.amount } + totalLendingAmount
+        val upcomingTotal = state.scheduledExpenses.filter { !it.isCompleted }.sumOf { it.amount }
+        val virtualBalance = currentAssets - upcomingTotal
 
         val remainingDays = ((currentGoal.targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
         val remainingMonths = (remainingDays / 30.0).coerceAtLeast(0.1)
         val totalExpectedIncome = (currentGoal.monthlyIncome * remainingMonths).toLong()
-        val totalSpendable = (currentAssets + totalExpectedIncome - currentGoal.targetAmount).coerceAtLeast(0L)
+        val totalSpendable = (virtualBalance + totalExpectedIncome - currentGoal.targetAmount).coerceAtLeast(0L)
         val monthlyBudget = if (remainingMonths > 0) (totalSpendable / remainingMonths).toLong() else 0L
 
-        val progressRatio = (currentAssets.toFloat() / currentGoal.targetAmount.toFloat()).coerceIn(0f, 1.2f)
+        val progressRatio = (virtualBalance.toFloat() / currentGoal.targetAmount.toFloat()).coerceIn(0f, 1.2f)
         val progressPercent = (progressRatio * 100).toInt()
 
         val totalGoalDays = ((currentGoal.targetDateMillis - currentGoal.startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(1L)
@@ -191,7 +203,7 @@ class HomeViewModel(
             appendLine()
             appendLine("目標: ${currentGoal.title}")
             appendLine("目標金額: ¥${String.format(Locale.JAPAN, "%,d", currentGoal.targetAmount)}")
-            appendLine("現在の資産: ¥${String.format(Locale.JAPAN, "%,d", currentAssets)}（達成率$progressPercent%）")
+            appendLine("自由に使える残高: ¥${String.format(Locale.JAPAN, "%,d", virtualBalance)}（達成率$progressPercent%）")
             appendLine("期限まで: $remainingDays 日（期間経過率${timeProgressPercent}%）")
             appendLine("今後の月予算目安: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
             

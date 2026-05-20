@@ -126,6 +126,7 @@ class MainActivity : FragmentActivity() {
             var consultingTransaction by remember { mutableStateOf<Transaction?>(null) }
             var initialHomeAdviceText by remember { mutableStateOf<String?>(null) }
             var recoveryLending by remember { mutableStateOf<LendingEntity?>(null) }
+            var initialInputMode by remember { mutableStateOf<String?>(null) }
             var initialAssetCategoryFilter by remember { mutableStateOf<String?>(null) }
             var isGoalKeypadVisible by remember { mutableStateOf(value = false) }
 
@@ -184,8 +185,6 @@ class MainActivity : FragmentActivity() {
                     showBackupPasswordDialog = true
                 }
             }
-
-            val isKeyboardVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
 
             LaunchedEffect(Unit) {
                 mainViewModel.checkAiStatus()
@@ -515,6 +514,11 @@ class MainActivity : FragmentActivity() {
                 )
             }
 
+            androidx.activity.compose.BackHandler(enabled = selectedTab != 0) {
+                if (selectedTab == 5) selectedTab = 4
+                else selectedTab = 0
+            }
+
             Surface(modifier = Modifier.fillMaxSize(), color = NotionBackground) {
                 if (isLoading) {
                     // 読み込み中（一瞬のチラつき防止）
@@ -575,12 +579,7 @@ class MainActivity : FragmentActivity() {
                     ) {
                         Box(modifier = Modifier.fillMaxSize()) {
                             Scaffold(
-                                contentWindowInsets = WindowInsets.systemBars,
-                                bottomBar = {
-                                    if (!isKeyboardVisible && selectedTab <= 4) {
-                                        Spacer(modifier = Modifier.fillMaxWidth().navigationBarsPadding().height(80.dp))
-                                    }
-                                }
+                                contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
                             ) { innerPadding ->
                                 Box(modifier = Modifier.fillMaxSize()) {
                                     AnimatedContent(
@@ -599,27 +598,33 @@ class MainActivity : FragmentActivity() {
                                                 HomeScreen(
                                                     viewModel = homeViewModel,
                                                     dao = dao,
-                                                    onConsultClick = { tx ->
-                                                        consultingTransaction = tx
-                                                        selectedTab = 3
+                                                    onInputClick = { mode ->
+                                                        initialInputMode = mode
+                                                        selectedTab = 1
+                                                    },
+                                                    onConsultClick = { 
+                                                        selectedTab = 3 
                                                     },
                                                     onAiAdviceClick = { advice ->
                                                         initialHomeAdviceText = advice
                                                         selectedTab = 3
                                                     },
-                                                    onCategoryClick = { category ->
-                                                        initialAssetCategoryFilter = category
-                                                        selectedTab = 2
-                                                    },
-                                                    onGoalClick = { selectedTab = 6 }
+                                                    onAssetsClick = { selectedTab = 2 },
+                                                    onGoalClick = { selectedTab = 6 },
+                                                    onSettingsClick = { selectedTab = 4 }
                                                 )
                                             }
                                             1 -> Box(Modifier.padding(innerPadding)) {
                                                 InputScreen(
                                                     dao = dao, gemini = gemini, ocrManager = ocrManager,
                                                     initialRecovery = recoveryLending,
-                                                    onRecoveryHandled = { recoveryLending = null },
-                                                    onExternalActivityLaunch = { isExternalActivityLaunching = true }
+                                                    initialMode = initialInputMode,
+                                                    onRecoveryHandled = { 
+                                                        recoveryLending = null
+                                                        initialInputMode = null
+                                                    },
+                                                    onExternalActivityLaunch = { isExternalActivityLaunching = true },
+                                                    onBack = { selectedTab = 0 }
                                                 )
                                             }
                                             2 -> Box(Modifier.padding(innerPadding)) {
@@ -629,7 +634,8 @@ class MainActivity : FragmentActivity() {
                                                         recoveryLending = lending
                                                         selectedTab = 1
                                                     },
-                                                    initialCategoryFilter = initialAssetCategoryFilter
+                                                    initialCategoryFilter = initialAssetCategoryFilter,
+                                                    onBack = { selectedTab = 0 }
                                                 )
                                             }
                                             3 -> {
@@ -646,6 +652,7 @@ class MainActivity : FragmentActivity() {
                                                     onClearConsultation = { consultingTransaction = null },
                                                     initialHomeAdviceText = initialHomeAdviceText,
                                                     onClearHomeAdvice = { initialHomeAdviceText = null },
+                                                    onBack = { selectedTab = 0 },
                                                     modifier = Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding)
                                                 )
                                             }
@@ -699,19 +706,7 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
                             
-                            SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp))
-
-                            if (!isKeyboardVisible && !isGoalKeypadVisible && selectedTab <= 4) {
-                                FloatingNavBar(
-                                    selectedTab = selectedTab,
-                                    onTabSelected = { index ->
-                                        if (index != 3) consultingTransaction = null
-                                        if (index != 2) initialAssetCategoryFilter = null
-                                        selectedTab = index
-                                    },
-                                    modifier = Modifier.align(Alignment.BottomCenter)
-                                )
-                            }
+                            SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
                         }
                     }
                 }

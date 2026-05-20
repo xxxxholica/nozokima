@@ -37,6 +37,7 @@ fun AssetsScreen(
     dao: FinanceDao,
     onRecoverClick: (LendingEntity) -> Unit = {},
     initialCategoryFilter: String? = null,
+    onBack: () -> Unit = {},
 ) {
     val assetsFromDb by dao.getAllAssets().collectAsState(initial = emptyList())
     val transactions by dao.getAllTransactions().collectAsState(initial = emptyList())
@@ -138,23 +139,18 @@ fun AssetsScreen(
                     else -> "収支履歴"
                 }
             } else "資産状況",
-            navigationIcon = if (isHistoryMode) {
-                {
-                    Surface(
-                        onClick = { 
-                            isHistoryMode = false
-                            isScheduledHistoryMode = false
-                        },
-                        modifier = Modifier.size(36.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        color = NotionTextSecondary.copy(alpha = 0.1f)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る", tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
-                        }
+            navigationIcon = {
+                IconButton(onClick = {
+                    if (isHistoryMode) {
+                        isHistoryMode = false
+                        isScheduledHistoryMode = false
+                    } else {
+                        onBack()
                     }
+                }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
                 }
-            } else null
+            }
         ) {
             if (!isHistoryMode) {
                 Surface(
@@ -629,6 +625,7 @@ fun AssetsScreen(
     }
 
     if (showAddItemDialog) {
+        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
         ModalBottomSheet(
             onDismissRequest = { showAddItemDialog = false },
             containerColor = Color.White,
@@ -636,7 +633,15 @@ fun AssetsScreen(
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {
             val spec = assetTypeUiSpec(selectedGroupTitle)
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null
+                    ) { focusManager.clearFocus() }
+                    .padding(horizontal = 24.dp)
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
@@ -723,9 +728,10 @@ fun AssetsScreen(
                         }
                     },
                     onSaveClick = {
-                        val amountText = if (editAmountText.any { it in "+-*/" }) {
-                            try { evaluateExpression(editAmountText).toString() } catch (e: Exception) { editAmountText }
-                        } else editAmountText
+                        val cleanAmountText = editAmountText.replace(",", "").replace("¥", "").trim()
+                        val amountText = if (cleanAmountText.any { it in "+-*/" }) {
+                            try { evaluateExpression(cleanAmountText).toString() } catch (e: Exception) { cleanAmountText }
+                        } else cleanAmountText
                         
                         val amount = amountText.replace("−", "-").toIntOrNull() ?: 0
                         scope.launch {
@@ -802,7 +808,7 @@ fun AssetsScreen(
                             Box(
                                 modifier = Modifier
                                     .size(48.dp)
-                                    .background(spec.accentColor.copy(alpha = 0.1f), RoundedCornerShape(12.dp)),
+                                    .background(NotionBorder.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(spec.icon, null, tint = spec.accentColor, modifier = Modifier.size(24.dp))
@@ -828,7 +834,7 @@ fun AssetsScreen(
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
-                        color = Color.White,
+                        color = NotionBackground,
                         border = BorderStroke(1.dp, NotionBorder)
                     ) {
                         Column {
@@ -836,10 +842,11 @@ fun AssetsScreen(
                                 headlineContent = { Text("金額を修正する", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
                                 supportingContent = { Text("現在の残高を直接書き換えます", fontSize = 12.sp) },
                                 leadingContent = { 
-                                    Box(modifier = Modifier.size(40.dp).background(NotionSafeGreen.copy(alpha = 0.08f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                                        Icon(Icons.Default.Edit, contentDescription = null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
+                                    Box(modifier = Modifier.size(40.dp).background(NotionBorder.copy(alpha = 0.4f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Edit, contentDescription = null, tint = NotionTextSecondary, modifier = Modifier.size(20.dp))
                                     }
                                 },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                                 modifier = Modifier.clickable {
                                     editAmountText = formatAmountWithCommas(asset.amount.toString())
                                     showAssetAmountEdit = true
@@ -850,10 +857,11 @@ fun AssetsScreen(
                                 headlineContent = { Text("この資産を削除", color = Color(0xFFD32F2F), fontSize = 15.sp, fontWeight = FontWeight.Medium) },
                                 supportingContent = { Text("資産一覧から削除します（履歴は保持されます）", fontSize = 12.sp) },
                                 leadingContent = { 
-                                    Box(modifier = Modifier.size(40.dp).background(Color(0xFFFFEBEE), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.size(40.dp).background(NotionBorder.copy(alpha = 0.4f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
                                         Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFD32F2F), modifier = Modifier.size(20.dp))
                                     }
                                 },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                                 modifier = Modifier.clickable { showAssetDeleteConfirm = true }
                             )
                         }
@@ -933,9 +941,10 @@ fun AssetsScreen(
                             }
                         },
                         onSaveClick = {
-                            val amountText = if (editAmountText.any { it in "+-*/" }) {
-                                try { evaluateExpression(editAmountText).toString() } catch (e: Exception) { editAmountText }
-                            } else editAmountText
+                            val cleanAmountText = editAmountText.replace(",", "").replace("¥", "").trim()
+                            val amountText = if (cleanAmountText.any { it in "+-*/" }) {
+                                try { evaluateExpression(cleanAmountText).toString() } catch (e: Exception) { cleanAmountText }
+                            } else cleanAmountText
 
                             val newAmount = amountText.replace("−", "-").toIntOrNull() ?: asset.amount
                             val diff = newAmount - asset.amount
@@ -1087,23 +1096,45 @@ fun ScheduledExpenseRow(
                 }
             }
             
-            Column(horizontalAlignment = Alignment.End) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "¥ ${String.format(Locale.JAPAN, "%,d", expense.amount)}",
                     color = if (expense.isCompleted) NotionTextSecondary else NotionTextPrimary,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
+                Spacer(modifier = Modifier.width(8.dp))
                 if (!expense.isCompleted) {
-                    TextButton(
+                    Surface(
                         onClick = onComplete,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier = Modifier.height(28.dp)
+                        shape = RoundedCornerShape(8.dp),
+                        color = NotionSafeGreen,
+                        modifier = Modifier.size(32.dp)
                     ) {
-                        Text("支払完了", fontSize = 12.sp, color = NotionSafeGreen)
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "支払完了",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 } else {
-                    Text("完了", color = NotionSafeGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = NotionSafeGreen.copy(alpha = 0.1f),
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "完了",
+                                tint = NotionSafeGreen.copy(alpha = 0.4f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
                 }
             }
         }

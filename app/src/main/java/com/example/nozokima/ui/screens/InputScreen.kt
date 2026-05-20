@@ -14,9 +14,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
@@ -28,6 +32,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -35,6 +41,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -68,18 +76,28 @@ class TakePictureWithExplicitGrants : ActivityResultContracts.TakePicture() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun InputScreen(
     dao: FinanceDao,
     gemini: GeminiNanoModel? = null,
     ocrManager: OcrManager? = null,
     initialRecovery: LendingEntity? = null,
+    initialMode: String? = null,
     onRecoveryHandled: () -> Unit = {},
     onExternalActivityLaunch: () -> Unit = {},
+    onBack: () -> Unit = {},
 ) {
     val modes = listOf("支出", "収入", "振替", "貸付", "回収")
-    var selectedMode by remember { mutableStateOf(if (initialRecovery != null) "回収" else "支出") }
+    var selectedMode by remember(initialRecovery, initialMode) { 
+        mutableStateOf(
+            when {
+                initialRecovery != null -> "回収"
+                initialMode != null && initialMode in modes -> initialMode
+                else -> "支出"
+            }
+        ) 
+    }
     var selectedPaymentType by remember { mutableStateOf("即時") }
     
     var amountText by remember { mutableStateOf(if (initialRecovery != null) (initialRecovery.amount - initialRecovery.recoveredAmount).toString() else "") }
@@ -103,10 +121,20 @@ fun InputScreen(
     var isAnalyzingOcr by remember { mutableStateOf(false) }
     var successInfo by remember { mutableStateOf<SavedRecordInfo?>(null) }
 
+    val memoBringIntoViewRequester = remember { BringIntoViewRequester() }
+    val personBringIntoViewRequester = remember { BringIntoViewRequester() }
+
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val ime = WindowInsets.ime
+    val isKeyboardVisible by remember {
+        derivedStateOf {
+            ime.getBottom(density) > 0
+        }
+    }
 
     val dbAssets by dao.getAllAssets().collectAsState(initial = emptyList())
     val customCategories by dao.getAllCategories().collectAsState(initial = emptyList())
@@ -320,6 +348,38 @@ fun InputScreen(
         selectedPaymentType = "即時"
     }
 
+    // 日付選択時に支払種別を自動調整
+    LaunchedEffect(selectedDate, selectedMode) {
+        if (selectedMode == "支出") {
+            val now = Calendar.getInstance()
+            val todayStart = now.apply {
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            
+            val selectedCal = Calendar.getInstance().apply {
+                timeInMillis = selectedDate
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val selectedDateStart = selectedCal.timeInMillis
+            
+            if (selectedDateStart > todayStart) {
+                if (selectedPaymentType == "即時") {
+                    selectedPaymentType = "後払い"
+                }
+            } else {
+                if (selectedPaymentType == "後払い") {
+                    selectedPaymentType = "即時"
+                }
+            }
+        }
+    }
+
     val accentColor = when (selectedMode) {
         "支出" -> Color(0xFFD32F2F)
         "収入" -> NotionSafeGreen
@@ -505,11 +565,41 @@ fun InputScreen(
 
     BackHandler(enabled = showKeypad) { showKeypad = false }
 
-    Box(modifier = Modifier.fillMaxSize().background(NotionBackground)) {
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val scrollState = rememberScrollState()
+
+    // キーボード表示時にフォーカスされている要素へスクロール
+    LaunchedEffect(isKeyboardVisible) {
+        if (!isKeyboardVisible) {
+            // キーボードが閉じたら最上部（または適切な位置）に戻す
+            scrollState.animateScrollTo(0)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(NotionBackground)
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null
+            ) {
+                focusManager.clearFocus()
+            }
+    ) {
         Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
         ) {
-            ScreenHeader(title = "記録")
+            ScreenHeader(
+                title = "記録",
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
+                    }
+                }
+            )
             Spacer(modifier = Modifier.height(12.dp))
 
             // セグメントコントロール (独立したブロック形式)
@@ -743,6 +833,66 @@ fun InputScreen(
                     enabled = isDetailEnabled
                 )
 
+                // Memo Field
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .alpha(detailAlpha)
+                        .bringIntoViewRequester(memoBringIntoViewRequester),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, NotionBorder)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(40.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = accentColor.copy(alpha = 0.08f)
+                        ) {
+                            Icon(
+                                Icons.Default.EditNote,
+                                contentDescription = null,
+                                tint = accentColor,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("メモ", fontSize = 12.sp, color = NotionTextSecondary)
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = memoText,
+                                onValueChange = { memoText = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { 
+                                        if (it.isFocused) { 
+                                            scope.launch { 
+                                                // 反応を速くするためディレイを短縮
+                                                kotlinx.coroutines.delay(60)
+                                                // 下方向に余裕（500px分）を持たせてスクロール
+                                                memoBringIntoViewRequester.bringIntoView(Rect(0f, 0f, 0f, 500f))
+                                            } 
+                                        } 
+                                    },
+                                enabled = isDetailEnabled,
+                                singleLine = true,
+                                textStyle = TextStyle(fontSize = 15.sp, color = NotionTextPrimary, fontWeight = FontWeight.SemiBold),
+                                cursorBrush = SolidColor(accentColor),
+                                keyboardOptions = KeyboardOptions(
+                                    imeAction = if (selectedMode == "貸付") ImeAction.Next else ImeAction.Done
+                                ),
+                                decorationBox = { inner ->
+                                    if (memoText.isEmpty()) Text("メモを入力", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
+                                    inner()
+                                }
+                            )
+                        }
+                    }
+                }
+
                 if (selectedMode == "支出" || selectedMode == "収入") {
                     InputTile(
                         icon = selectedCategory?.icon ?: Icons.Outlined.Category,
@@ -757,7 +907,10 @@ fun InputScreen(
                 
                 if (selectedMode == "貸付") {
                     Surface(
-                        modifier = Modifier.fillMaxWidth().alpha(detailAlpha),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .alpha(detailAlpha)
+                            .bringIntoViewRequester(personBringIntoViewRequester),
                         shape = RoundedCornerShape(16.dp),
                         color = Color.White,
                         border = BorderStroke(1.dp, NotionBorder)
@@ -772,10 +925,25 @@ fun InputScreen(
                                 androidx.compose.foundation.text.BasicTextField(
                                     value = personName,
                                     onValueChange = { personName = it },
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged { 
+                                            if (it.isFocused) { 
+                                                scope.launch { 
+                                                    // 反応を速くするためディレイを短縮
+                                                    kotlinx.coroutines.delay(60)
+                                                    // 下方向に余裕（500px分）を持たせてスクロール
+                                                    personBringIntoViewRequester.bringIntoView(Rect(0f, 0f, 0f, 500f))
+                                                } 
+                                            } 
+                                        },
                                     enabled = isDetailEnabled,
                                     singleLine = true,
                                     textStyle = TextStyle(color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                                    keyboardOptions = KeyboardOptions(
+                                        imeAction = ImeAction.Done,
+                                        capitalization = KeyboardCapitalization.Words
+                                    ),
                                     decorationBox = { inner ->
                                         if (personName.isEmpty()) Text("名前を入力", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
                                         inner()
@@ -807,84 +975,52 @@ fun InputScreen(
                         enabled = isDetailEnabled
                     )
                 }
-
-                // Memo Field
-                Surface(
-                    modifier = Modifier.fillMaxWidth().alpha(detailAlpha),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, NotionBorder)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            modifier = Modifier.size(40.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            color = accentColor.copy(alpha = 0.08f)
-                        ) {
-                            Icon(
-                                Icons.Default.EditNote,
-                                contentDescription = null,
-                                tint = accentColor,
-                                modifier = Modifier.padding(10.dp)
-                            )
-                        }
-                        Spacer(Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("メモ", fontSize = 12.sp, color = NotionTextSecondary)
-                            androidx.compose.foundation.text.BasicTextField(
-                                value = memoText,
-                                onValueChange = { memoText = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                enabled = isDetailEnabled,
-                                singleLine = true,
-                                textStyle = TextStyle(fontSize = 15.sp, color = NotionTextPrimary, fontWeight = FontWeight.SemiBold),
-                                cursorBrush = SolidColor(accentColor),
-                                decorationBox = { inner ->
-                                    if (memoText.isEmpty()) Text("メモを入力", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
-                                    inner()
-                                }
-                            )
-                        }
-                    }
-                }
             }
 
-            Spacer(modifier = Modifier.height(100.dp))
+            // 物理的な大きなスペーサーを一番下に配置して、強制的にスクロール可能にする
+            Spacer(modifier = Modifier.height(300.dp))
         }
 
-        // Footer
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp, start = 24.dp, end = 24.dp)
-        ) {
-            Button(
-                onClick = onSave,
+        // Footer - 常に下部に表示
+        if (!isKeyboardVisible) {
+            Box(
                 modifier = Modifier
+                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .height(56.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = accentColor,
-                    disabledContainerColor = NotionBorder
-                ),
-                shape = RoundedCornerShape(16.dp),
-                enabled = isSaveEnabled
+                    .background(
+                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, NotionBackground.copy(alpha = 0.9f), NotionBackground),
+                            startY = 0f
+                        )
+                    )
+                    .padding(horizontal = 24.dp)
+                    .padding(top = 24.dp, bottom = 24.dp)
             ) {
-                Text(
-                    text = when(selectedMode) {
-                        "支出" -> if (selectedPaymentType == "即時") "支出を記録する" else "予定に追加する"
-                        "収入" -> "収入を記録する"
-                        "振替" -> "振替を記録する"
-                        "貸付" -> "貸付を記録する"
-                        "回収" -> "回収を記録する"
-                        else -> "記録する"
-                    },
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Button(
+                    onClick = onSave,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = accentColor,
+                        disabledContainerColor = NotionBorder
+                    ),
+                    shape = RoundedCornerShape(16.dp),
+                    enabled = isSaveEnabled
+                ) {
+                    Text(
+                        text = when(selectedMode) {
+                            "支出" -> if (selectedPaymentType == "即時") "支出を記録する" else "予定に追加する"
+                            "収入" -> "収入を記録する"
+                            "振替" -> "振替を記録する"
+                            "貸付" -> "貸付を記録する"
+                            "回収" -> "回収を記録する"
+                            else -> "記録する"
+                        },
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
 

@@ -19,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -94,6 +95,7 @@ fun UnifiedAssetCardRow(
             .height(74.dp)
             .background(Color.White, RoundedCornerShape(14.dp))
             .border(1.dp, NotionBorder, RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(14.dp))
             .then(interactionModifier)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
