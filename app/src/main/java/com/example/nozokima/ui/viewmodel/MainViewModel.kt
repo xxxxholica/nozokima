@@ -7,6 +7,7 @@ import com.example.nozokima.data.local.entities.AppSettingsEntity
 import com.example.nozokima.data.local.entities.ChatSessionEntity
 import com.example.nozokima.data.manager.GeminiNanoModel
 import com.google.mlkit.genai.common.FeatureStatus
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -15,7 +16,8 @@ data class MainUiState(
     val chatSessions: List<ChatSessionEntity> = emptyList(),
     val aiStatus: Int = 0,
     val aiIsReady: Boolean = false,
-    val aiIsGenerating: Boolean = false
+    val aiIsGenerating: Boolean = false,
+    val isLoaded: Boolean = false
 )
 
 class MainViewModel(
@@ -41,9 +43,11 @@ class MainViewModel(
             chatSessions = sessions,
             aiStatus = status,
             aiIsReady = ready,
-            aiIsGenerating = generating
+            aiIsGenerating = generating,
+            isLoaded = true
         )
-    }.stateIn(
+    }.flowOn(Dispatchers.Default)
+    .stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = MainUiState()

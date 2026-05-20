@@ -10,6 +10,7 @@ import com.example.nozokima.data.local.entities.LendingEntity
 import com.example.nozokima.data.local.entities.BudgetEntity
 import com.example.nozokima.data.local.entities.ScheduledExpenseEntity
 import com.example.nozokima.data.manager.GeminiNanoModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.*
@@ -87,7 +88,8 @@ class HomeViewModel(
             isAiCheckingStatus = isAiChecking,
             isAiInitialized = isAiInitialized
         )
-    }.stateIn(
+    }.flowOn(Dispatchers.Default)
+    .stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = HomeUiState()

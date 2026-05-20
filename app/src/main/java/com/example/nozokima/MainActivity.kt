@@ -114,7 +114,7 @@ class MainActivity : FragmentActivity() {
                 }
             }
 
-            val dao = db.financeDao()
+            val dao = remember { db.financeDao() }
             val factory = remember { ViewModelFactory(dao, gemini) }
             val mainViewModel: MainViewModel = viewModel(factory = factory)
             val homeViewModel: HomeViewModel = viewModel(factory = factory)
@@ -140,19 +140,19 @@ class MainActivity : FragmentActivity() {
 
             val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
-            var isAppLocked by rememberSaveable { mutableStateOf(true) }
-            var isExternalActivityLaunching by rememberSaveable { mutableStateOf(false) }
-            val appSettings = mainUiState.appSettings
-            val isLoading = appSettings == null
-            val showLockScreen = isAppLocked && (appSettings?.isAppLockEnabled == true)
+            val isAppLocked = rememberSaveable { mutableStateOf(true) }
+            val isExternalActivityLaunching = rememberSaveable { mutableStateOf(false) }
+            val appSettings = mainUiState.appSettings ?: AppSettingsEntity()
+            val isLoading = !mainUiState.isLoaded
+            val showLockScreen = isAppLocked.value && appSettings.isAppLockEnabled
             val lifecycle = LocalLifecycleOwner.current.lifecycle
 
             DisposableEffect(lifecycle) {
                 val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_STOP) {
-                        if (!isExternalActivityLaunching) isAppLocked = true
+                        if (!isExternalActivityLaunching.value) isAppLocked.value = true
                     } else if (event == Lifecycle.Event.ON_RESUME) {
-                        isExternalActivityLaunching = false
+                        isExternalActivityLaunching.value = false
                     }
                 }
                 lifecycle.addObserver(observer)
@@ -293,7 +293,7 @@ class MainActivity : FragmentActivity() {
                             onConfirmClick = {
                                 when {
                                     isDisableMode -> {
-                                        if (appSettings?.appLockPassword != null && currentPasswordInput == appSettings.appLockPassword) {
+                                        if (appSettings.appLockPassword != null && currentPasswordInput == appSettings.appLockPassword) {
                                             scope.launch {
                                                 dao.upsertAppSettings(appSettings.copy(isAppLockEnabled = false, isBiometricEnabled = false))
                                                 showAppLockPasswordDialog = false
@@ -306,7 +306,7 @@ class MainActivity : FragmentActivity() {
                                     isChangeMode -> {
                                         when(step) {
                                             0 -> {
-                                                if (currentPasswordInput == appSettings?.appLockPassword) step = 1
+                                                if (currentPasswordInput == appSettings.appLockPassword) step = 1
                                                 else {
                                                     scope.launch { snackbarHostState.showSnackbar("現在のパスワードが正しくありません") }
                                                     currentPasswordInput = ""
@@ -316,8 +316,7 @@ class MainActivity : FragmentActivity() {
                                             2 -> {
                                                 if (newPasswordInput == confirmPasswordInput) {
                                                     scope.launch {
-                                                        val currentSettings = appSettings ?: AppSettingsEntity()
-                                                        dao.upsertAppSettings(currentSettings.copy(appLockPassword = newPasswordInput, isAppLockEnabled = true))
+                                                        dao.upsertAppSettings(appSettings.copy(appLockPassword = newPasswordInput, isAppLockEnabled = true))
                                                         showAppLockPasswordDialog = false
                                                         snackbarHostState.showSnackbar("パスワードを変更しました")
                                                     }
@@ -337,8 +336,7 @@ class MainActivity : FragmentActivity() {
                                         } else {
                                             if (newPasswordInput == confirmPasswordInput) {
                                                 scope.launch {
-                                                    val currentSettings = appSettings ?: AppSettingsEntity()
-                                                    dao.upsertAppSettings(currentSettings.copy(appLockPassword = newPasswordInput, isAppLockEnabled = true))
+                                                    dao.upsertAppSettings(appSettings.copy(appLockPassword = newPasswordInput, isAppLockEnabled = true))
                                                     showAppLockPasswordDialog = false
                                                     snackbarHostState.showSnackbar("パスワードを設定しました")
                                                 }
@@ -471,7 +469,7 @@ class MainActivity : FragmentActivity() {
                 } else if (showLockScreen) {
                     AppLockScreen(
                         correctPassword = appSettings.appLockPassword ?: "",
-                        onUnlock = { isAppLocked = false },
+                        onUnlock = { isAppLocked.value = false },
                         failedAttempts = appSettings.failedAttempts,
                         lockoutUntil = appSettings.lockoutUntil,
                         onFailedAttempt = { attempts, until ->
@@ -491,7 +489,7 @@ class MainActivity : FragmentActivity() {
                                     scope.launch {
                                         dao.upsertAppSettings(appSettings.copy(failedAttempts = 0, lockoutUntil = 0L))
                                     }
-                                    isAppLocked = false
+                                    isAppLocked.value = false
                                 }
                             )
                         }
@@ -550,7 +548,7 @@ class MainActivity : FragmentActivity() {
                                                                     recoveryLending = null
                                                                     initialInputMode = null
                                                                 },
-                                                                onExternalActivityLaunch = { isExternalActivityLaunching = true },
+                                                                onExternalActivityLaunch = { isExternalActivityLaunching.value = true },
                                                                 onBack = { selectedTab = 0 }
                                                             )
                                                         }
