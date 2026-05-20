@@ -177,6 +177,9 @@ fun InputScreen(
         "Face" to Icons.Default.Face,
         "Info" to Icons.Default.Info,
         "AccountBalance" to Icons.Default.AccountBalance,
+        "Refresh" to Icons.Default.Refresh,
+        "History" to Icons.Default.History,
+        "ShowChart" to Icons.Default.ShowChart,
         "MoreHoriz" to Icons.Default.MoreHoriz
     )
 
@@ -185,13 +188,17 @@ fun InputScreen(
             CategoryData(it.name, iconMap[it.iconName] ?: Icons.Default.MoreHoriz)
         }.ifEmpty {
             listOf(
-                CategoryData("食費", Icons.Default.ShoppingCart),
-                CategoryData("日用品", Icons.Default.Build),
-                CategoryData("交通費", Icons.Default.Place),
-                CategoryData("交際費", Icons.Default.Favorite),
-                CategoryData("娯楽", Icons.Default.Star),
-                CategoryData("美容", Icons.Default.Face),
-                CategoryData("健康", Icons.Default.Info),
+                CategoryData("食生活", Icons.Default.Restaurant),
+                CategoryData("住まい", Icons.Default.Home),
+                CategoryData("インフラ", Icons.Default.Wifi),
+                CategoryData("日用雑貨", Icons.Default.LocalMall),
+                CategoryData("移動・交通", Icons.Default.Place),
+                CategoryData("健康・医療", Icons.Default.MedicalServices),
+                CategoryData("自分磨き", Icons.Default.School),
+                CategoryData("レジャー", Icons.Default.Star),
+                CategoryData("交際・贈答", Icons.Default.Favorite),
+                CategoryData("美容・装い", Icons.Default.Face),
+                CategoryData("特別な支出", Icons.Default.CardGiftcard),
                 CategoryData("その他", Icons.Default.MoreHoriz)
             )
         }
@@ -203,10 +210,16 @@ fun InputScreen(
         }.ifEmpty {
             listOf(
                 CategoryData("給与", Icons.Default.AccountBalance),
-                CategoryData("賞与", Icons.Default.Star),
-                CategoryData("副業", Icons.Default.Build),
-                CategoryData("お小遣い", Icons.Default.Favorite),
-                CategoryData("還付金", Icons.Default.Info),
+                CategoryData("事業・副業", Icons.Default.Build),
+                CategoryData("資産運用", Icons.Default.Savings),
+                CategoryData("臨時収入", Icons.Default.Star),
+                CategoryData("給付・手当", Icons.Default.Info),
+                CategoryData("還付・返金", Icons.Default.Refresh),
+                CategoryData("贈与・祝金", Icons.Default.Favorite),
+                CategoryData("ポイ活", Icons.Default.Payments),
+                CategoryData("不用品売却", Icons.Default.LocalMall),
+                CategoryData("繰越金", Icons.Default.History),
+                CategoryData("利息・配当", Icons.Default.ShowChart),
                 CategoryData("その他", Icons.Default.MoreHoriz)
             )
         }
@@ -587,344 +600,293 @@ fun InputScreen(
                 focusManager.clearFocus()
             }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-        ) {
+        Column(modifier = Modifier.fillMaxSize()) {
             ScreenHeader(
                 title = "記録",
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
+                    Surface(
+                        onClick = onBack,
+                        modifier = Modifier.size(36.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        color = NotionTextSecondary.copy(alpha = 0.1f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る", tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
+                        }
                     }
                 }
             )
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // セグメントコントロール (独立したブロック形式)
-            Row(
+            
+            Column(
                 modifier = Modifier
-                    .padding(horizontal = 24.dp)
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .weight(1f)
+                    .verticalScroll(scrollState)
             ) {
-                modes.forEach { mode ->
-                    val isSelected = selectedMode == mode
-                    val modeColor = when (mode) {
-                        "支出" -> Color(0xFFD32F2F)
-                        "収入" -> NotionSafeGreen
-                        "振替" -> Color(0xFF1976D2)
-                        "貸付" -> Color(0xFFFB8C00)
-                        "回収" -> Color(0xFF00897B)
-                        else -> NotionTextPrimary
-                    }
-                    
-                    Surface(
-                        onClick = { selectedMode = mode },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isSelected) modeColor.copy(alpha = 0.12f) else Color.White,
-                        border = BorderStroke(1.dp, if (isSelected) modeColor else NotionBorder)
-                    ) {
-                        Box(
-                            modifier = Modifier.padding(vertical = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = mode,
-                                color = if (isSelected) modeColor else NotionTextSecondary,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-            }
+                Spacer(modifier = Modifier.height(12.dp))
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 金額ボックス
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Surface(
+                // セグメントコントロール (独立したブロック形式)
+                Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showKeypad = true },
-                    shape = RoundedCornerShape(20.dp),
-                    color = accentColor.copy(alpha = 0.15f),
-                    border = BorderStroke(1.5.dp, accentColor.copy(alpha = 0.5f))
+                        .padding(horizontal = 24.dp)
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 28.dp, vertical = 28.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = if (amountText.isEmpty()) "¥0" else "¥$amountText",
-                                fontSize = 44.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = accentColor,
-                                letterSpacing = (-1).sp,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (selectedMode == "支出") {
-                                IconButton(
-                                    onClick = { showOcrOptions = true },
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .background(accentColor.copy(alpha = 0.1f), CircleShape)
-                                ) {
-                                    Icon(
-                                        Icons.Default.CameraAlt,
-                                        contentDescription = "OCR",
-                                        tint = accentColor
-                                    )
-                                }
-                            }
+                    modes.forEach { mode ->
+                        val isSelected = selectedMode == mode
+                        val modeColor = when (mode) {
+                            "支出" -> Color(0xFFD32F2F)
+                            "収入" -> NotionSafeGreen
+                            "振替" -> Color(0xFF1976D2)
+                            "貸付" -> Color(0xFFFB8C00)
+                            "回収" -> Color(0xFF00897B)
+                            else -> NotionTextPrimary
                         }
-
-                        if (isAnalyzingOcr) {
+                        
+                        Surface(
+                            onClick = { selectedMode = mode },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) modeColor.copy(alpha = 0.12f) else Color.White,
+                            border = BorderStroke(1.dp, if (isSelected) modeColor else NotionBorder)
+                        ) {
                             Box(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .background(Color.White.copy(alpha = 0.8f), RoundedCornerShape(20.dp)),
+                                modifier = Modifier.padding(vertical = 10.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CircularProgressIndicator(
-                                        color = accentColor,
-                                        modifier = Modifier.size(24.dp),
-                                        strokeWidth = 3.dp
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                    Text("AIがレシートを分析中...", fontSize = 12.sp, color = accentColor, fontWeight = FontWeight.Bold)
-                                }
+                                Text(
+                                    text = mode,
+                                    color = if (isSelected) modeColor else NotionTextSecondary,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
                             }
                         }
                     }
                 }
-            }
 
-            if (showOcrOptions) {
-                ModalBottomSheet(
-                    onDismissRequest = { showOcrOptions = false },
-                    containerColor = Color.White,
-                    dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 金額ボックス
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
-                        Text("レシート読み取り", modifier = Modifier.padding(vertical = 16.dp), color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                AssetCategoryTile(
-                                    label = "カメラで撮影",
-                                    icon = Icons.Default.CameraAlt,
-                                    color = NotionSafeGreen,
-                                    onClick = {
-                                        showOcrOptions = false
-                                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                                            onExternalActivityLaunch()
-                                            cameraLauncher.launch(tempImageUri)
-                                        } else {
-                                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                                        }
-                                    }
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showKeypad = true },
+                        shape = RoundedCornerShape(20.dp),
+                        color = accentColor.copy(alpha = 0.15f),
+                        border = BorderStroke(1.5.dp, accentColor.copy(alpha = 0.5f))
+                    ) {
+                        Box {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 28.dp, vertical = 28.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = if (amountText.isEmpty()) "¥0" else "¥$amountText",
+                                    fontSize = 44.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = accentColor,
+                                    letterSpacing = (-1).sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.weight(1f)
                                 )
-                            }
-                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                AssetCategoryTile(
-                                    label = "アルバムから",
-                                    icon = Icons.Default.PhotoLibrary,
-                                    color = NotionSafeGreen,
-                                    onClick = {
-                                        showOcrOptions = false
-                                        onExternalActivityLaunch()
-                                        photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                    }
-                                )
-                            }
-                            // 3列目と4列目の調整（カテゴリーメニューの幅と合わせるため）
-                            Spacer(modifier = Modifier.weight(1f))
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Column(
-                modifier = Modifier.padding(horizontal = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                if (selectedMode == "回収") {
-                    InputTile(
-                        icon = Icons.AutoMirrored.Filled.List,
-                        label = "対象の貸付",
-                        value = selectedLending?.let { "${it.personName} (${it.memo.ifBlank { "無題" }})" } ?: "選択してください",
-                        onClick = { showLendingSheet = true },
-                        accentColor = accentColor,
-                        isPlaceholder = selectedLending == null
-                    )
-                    HorizontalDivider(thickness = 1.dp, color = NotionBorder, modifier = Modifier.padding(vertical = 4.dp))
-                }
-
-                val isDetailEnabled = selectedMode != "回収" || selectedLending != null
-                val detailAlpha = if (isDetailEnabled) 1f else 0.5f
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        "詳細情報",
-                        color = NotionTextPrimary.copy(alpha = detailAlpha),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(start = 4.dp)
-                    )
-
-                    if (selectedMode == "支出") {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf("即時", "後払い", "固定費").forEach { type ->
-                                val isSelected = selectedPaymentType == type
-                                Surface(
-                                    onClick = { selectedPaymentType = type },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isSelected) accentColor else Color.White,
-                                    border = BorderStroke(1.dp, if (isSelected) accentColor else NotionBorder),
-                                    modifier = Modifier.height(28.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier.padding(horizontal = 10.dp),
-                                        contentAlignment = Alignment.Center
+                                if (selectedMode == "支出") {
+                                    IconButton(
+                                        onClick = { showOcrOptions = true },
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .background(accentColor.copy(alpha = 0.1f), CircleShape)
                                     ) {
-                                        Text(
-                                            text = type,
-                                            fontSize = 11.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isSelected) Color.White else NotionTextSecondary
+                                        Icon(
+                                            Icons.Default.CameraAlt,
+                                            contentDescription = "OCR",
+                                            tint = accentColor
                                         )
                                     }
                                 }
                             }
-                        }
-                    }
-                }
 
-                InputTile(
-                    icon = Icons.Default.CalendarMonth,
-                    label = "支払日",
-                    value = dateFormatter.format(Date(selectedDate)),
-                    onClick = { showDatePicker = true },
-                    accentColor = accentColor,
-                    enabled = isDetailEnabled
-                )
-
-                // Memo Field
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .alpha(detailAlpha)
-                        .bringIntoViewRequester(memoBringIntoViewRequester),
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, NotionBorder)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            modifier = Modifier.size(40.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            color = accentColor.copy(alpha = 0.08f)
-                        ) {
-                            Icon(
-                                Icons.Default.EditNote,
-                                contentDescription = null,
-                                tint = accentColor,
-                                modifier = Modifier.padding(10.dp)
-                            )
-                        }
-                        Spacer(Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("メモ", fontSize = 12.sp, color = NotionTextSecondary)
-                            androidx.compose.foundation.text.BasicTextField(
-                                value = memoText,
-                                onValueChange = { memoText = it },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .onFocusChanged { 
-                                        if (it.isFocused) { 
-                                            scope.launch { 
-                                                // 反応を速くするためディレイを短縮
-                                                kotlinx.coroutines.delay(60)
-                                                // 下方向に余裕（500px分）を持たせてスクロール
-                                                memoBringIntoViewRequester.bringIntoView(Rect(0f, 0f, 0f, 500f))
-                                            } 
-                                        } 
-                                    },
-                                enabled = isDetailEnabled,
-                                singleLine = true,
-                                textStyle = TextStyle(fontSize = 15.sp, color = NotionTextPrimary, fontWeight = FontWeight.SemiBold),
-                                cursorBrush = SolidColor(accentColor),
-                                keyboardOptions = KeyboardOptions(
-                                    imeAction = if (selectedMode == "貸付") ImeAction.Next else ImeAction.Done
-                                ),
-                                decorationBox = { inner ->
-                                    if (memoText.isEmpty()) Text("メモを入力", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
-                                    inner()
+                            if (isAnalyzingOcr) {
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .background(Color.White.copy(alpha = 0.8f), RoundedCornerShape(20.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        CircularProgressIndicator(
+                                            color = accentColor,
+                                            modifier = Modifier.size(24.dp),
+                                            strokeWidth = 3.dp
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        Text("AIがレシートを分析中...", fontSize = 12.sp, color = accentColor, fontWeight = FontWeight.Bold)
+                                    }
                                 }
-                            )
+                            }
                         }
                     }
                 }
 
-                if (selectedMode == "支出" || selectedMode == "収入") {
+                if (showOcrOptions) {
+                    ModalBottomSheet(
+                        onDismissRequest = { showOcrOptions = false },
+                        containerColor = Color.White,
+                        dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
+                            Text("レシート読み取り", modifier = Modifier.padding(vertical = 16.dp), color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                    AssetCategoryTile(
+                                        label = "カメラで撮影",
+                                        icon = Icons.Default.CameraAlt,
+                                        color = NotionSafeGreen,
+                                        onClick = {
+                                            showOcrOptions = false
+                                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                                onExternalActivityLaunch()
+                                                cameraLauncher.launch(tempImageUri)
+                                            } else {
+                                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                            }
+                                        }
+                                    )
+                                }
+                                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                    AssetCategoryTile(
+                                        label = "アルバムから",
+                                        icon = Icons.Default.PhotoLibrary,
+                                        color = NotionSafeGreen,
+                                        onClick = {
+                                            showOcrOptions = false
+                                            onExternalActivityLaunch()
+                                            photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                        }
+                                    )
+                                }
+                                // 3列目と4列目の調整（カテゴリーメニューの幅と合わせるため）
+                                Spacer(modifier = Modifier.weight(1f))
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Column(
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (selectedMode == "回収") {
+                        InputTile(
+                            icon = Icons.AutoMirrored.Filled.List,
+                            label = "対象の貸付",
+                            value = selectedLending?.let { "${it.personName} (${it.memo.ifBlank { "無題" }})" } ?: "選択してください",
+                            onClick = { showLendingSheet = true },
+                            accentColor = accentColor,
+                            isPlaceholder = selectedLending == null
+                        )
+                        HorizontalDivider(thickness = 1.dp, color = NotionBorder, modifier = Modifier.padding(vertical = 4.dp))
+                    }
+
+                    val isDetailEnabled = selectedMode != "回収" || selectedLending != null
+                    val detailAlpha = if (isDetailEnabled) 1f else 0.5f
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "詳細情報",
+                            color = NotionTextPrimary.copy(alpha = detailAlpha),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(start = 4.dp)
+                        )
+
+                        if (selectedMode == "支出") {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf("即時", "後払い", "固定費").forEach { type ->
+                                    val isSelected = selectedPaymentType == type
+                                    Surface(
+                                        onClick = { selectedPaymentType = type },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (isSelected) accentColor else Color.White,
+                                        border = BorderStroke(1.dp, if (isSelected) accentColor else NotionBorder),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.padding(horizontal = 10.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = type,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (isSelected) Color.White else NotionTextSecondary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     InputTile(
-                        icon = selectedCategory?.icon ?: Icons.Outlined.Category,
-                        label = "カテゴリー",
-                        value = selectedCategory?.name ?: "未選択",
-                        onClick = { showCategorySheet = true },
+                        icon = Icons.Default.CalendarMonth,
+                        label = "支払日",
+                        value = dateFormatter.format(Date(selectedDate)),
+                        onClick = { showDatePicker = true },
                         accentColor = accentColor,
-                        isPlaceholder = selectedCategory == null,
                         enabled = isDetailEnabled
                     )
-                }
-                
-                if (selectedMode == "貸付") {
+
+                    // Memo Field
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .alpha(detailAlpha)
-                            .bringIntoViewRequester(personBringIntoViewRequester),
+                            .bringIntoViewRequester(memoBringIntoViewRequester),
                         shape = RoundedCornerShape(16.dp),
                         color = Color.White,
                         border = BorderStroke(1.dp, NotionBorder)
                     ) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = accentColor.copy(alpha = 0.08f)) {
-                                Icon(Icons.Default.Person, null, tint = accentColor, modifier = Modifier.padding(10.dp))
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(40.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = accentColor.copy(alpha = 0.08f)
+                            ) {
+                                Icon(
+                                    Icons.Default.EditNote,
+                                    contentDescription = null,
+                                    tint = accentColor,
+                                    modifier = Modifier.padding(10.dp)
+                                )
                             }
-                            Spacer(modifier = Modifier.width(16.dp))
+                            Spacer(Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("貸した相手", fontSize = 12.sp, color = NotionTextSecondary)
+                                Text("メモ", fontSize = 12.sp, color = NotionTextSecondary)
                                 androidx.compose.foundation.text.BasicTextField(
-                                    value = personName,
-                                    onValueChange = { personName = it },
+                                    value = memoText,
+                                    onValueChange = { memoText = it },
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .onFocusChanged { 
@@ -933,52 +895,113 @@ fun InputScreen(
                                                     // 反応を速くするためディレイを短縮
                                                     kotlinx.coroutines.delay(60)
                                                     // 下方向に余裕（500px分）を持たせてスクロール
-                                                    personBringIntoViewRequester.bringIntoView(Rect(0f, 0f, 0f, 500f))
+                                                    memoBringIntoViewRequester.bringIntoView(Rect(0f, 0f, 0f, 500f))
                                                 } 
                                             } 
                                         },
                                     enabled = isDetailEnabled,
                                     singleLine = true,
-                                    textStyle = TextStyle(color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                                    textStyle = TextStyle(fontSize = 15.sp, color = NotionTextPrimary, fontWeight = FontWeight.SemiBold),
+                                    cursorBrush = SolidColor(accentColor),
                                     keyboardOptions = KeyboardOptions(
-                                        imeAction = ImeAction.Done,
-                                        capitalization = KeyboardCapitalization.Words
+                                        imeAction = if (selectedMode == "貸付") ImeAction.Next else ImeAction.Done
                                     ),
                                     decorationBox = { inner ->
-                                        if (personName.isEmpty()) Text("名前を入力", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
+                                        if (memoText.isEmpty()) Text("メモを入力", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
                                         inner()
                                     }
                                 )
                             }
                         }
                     }
-                }
 
-                InputTile(
-                    icon = Icons.Default.AccountBalanceWallet,
-                    label = if (selectedMode == "貸付") "貸し出し元" else if (selectedMode == "回収") "受け取り先" else if (selectedMode == "振替") "振替元" else "資産",
-                    value = selectedAssetEntity?.name ?: "未選択",
-                    onClick = { showAssetSheet = true },
-                    accentColor = accentColor,
-                    isPlaceholder = selectedAssetEntity == null,
-                    enabled = isDetailEnabled
-                )
+                    if (selectedMode == "支出" || selectedMode == "収入") {
+                        InputTile(
+                            icon = selectedCategory?.icon ?: Icons.Outlined.Category,
+                            label = "カテゴリー",
+                            value = selectedCategory?.name ?: "未選択",
+                            onClick = { showCategorySheet = true },
+                            accentColor = accentColor,
+                            isPlaceholder = selectedCategory == null,
+                            enabled = isDetailEnabled
+                        )
+                    }
+                    
+                    if (selectedMode == "貸付") {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .alpha(detailAlpha)
+                                .bringIntoViewRequester(personBringIntoViewRequester),
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color.White,
+                            border = BorderStroke(1.dp, NotionBorder)
+                        ) {
+                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = accentColor.copy(alpha = 0.08f)) {
+                                    Icon(Icons.Default.Person, null, tint = accentColor, modifier = Modifier.padding(10.dp))
+                                }
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("貸した相手", fontSize = 12.sp, color = NotionTextSecondary)
+                                    androidx.compose.foundation.text.BasicTextField(
+                                        value = personName,
+                                        onValueChange = { personName = it },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .onFocusChanged { 
+                                                if (it.isFocused) { 
+                                                    scope.launch { 
+                                                        // 反応を速くするためディレイを短縮
+                                                        kotlinx.coroutines.delay(60)
+                                                        // 下方向に余裕（500px分）を持たせてスクロール
+                                                        personBringIntoViewRequester.bringIntoView(Rect(0f, 0f, 0f, 500f))
+                                                    } 
+                                                } 
+                                            },
+                                        enabled = isDetailEnabled,
+                                        singleLine = true,
+                                        textStyle = TextStyle(color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                                        keyboardOptions = KeyboardOptions(
+                                            imeAction = ImeAction.Done,
+                                            capitalization = KeyboardCapitalization.Words
+                                        ),
+                                        decorationBox = { inner ->
+                                            if (personName.isEmpty()) Text("名前を入力", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
+                                            inner()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
 
-                if (selectedMode == "振替") {
                     InputTile(
-                        icon = Icons.AutoMirrored.Filled.CompareArrows,
-                        label = "振替先",
-                        value = selectedToAssetEntity?.name ?: "未選択",
-                        onClick = { showToAssetSheet = true },
+                        icon = Icons.Default.AccountBalanceWallet,
+                        label = if (selectedMode == "貸付") "貸し出し元" else if (selectedMode == "回収") "受け取り先" else if (selectedMode == "振替") "振替元" else "資産",
+                        value = selectedAssetEntity?.name ?: "未選択",
+                        onClick = { showAssetSheet = true },
                         accentColor = accentColor,
-                        isPlaceholder = selectedToAssetEntity == null,
+                        isPlaceholder = selectedAssetEntity == null,
                         enabled = isDetailEnabled
                     )
-                }
-            }
 
-            // 物理的な大きなスペーサーを一番下に配置して、強制的にスクロール可能にする
-            Spacer(modifier = Modifier.height(300.dp))
+                    if (selectedMode == "振替") {
+                        InputTile(
+                            icon = Icons.AutoMirrored.Filled.CompareArrows,
+                            label = "振替先",
+                            value = selectedToAssetEntity?.name ?: "未選択",
+                            onClick = { showToAssetSheet = true },
+                            accentColor = accentColor,
+                            isPlaceholder = selectedToAssetEntity == null,
+                            enabled = isDetailEnabled
+                        )
+                    }
+                }
+
+                // 物理的な大きなスペーサーを一番下に配置して、強制的にスクロール可能にする
+                Spacer(modifier = Modifier.height(300.dp))
+            }
         }
 
         // Footer - 常に下部に表示

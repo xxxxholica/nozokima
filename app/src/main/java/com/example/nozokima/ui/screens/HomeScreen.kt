@@ -13,7 +13,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.RequestPage
@@ -45,6 +44,7 @@ fun HomeScreen(
     onInputClick: (String) -> Unit = {},
     onConsultClick: () -> Unit = {},
     onAssetsClick: () -> Unit = {},
+    onHistoryClick: () -> Unit = {},
     onGoalClick: () -> Unit = {},
     onSettingsClick: () -> Unit = {},
     onAiAdviceClick: (String) -> Unit = {},
@@ -64,8 +64,8 @@ fun HomeScreen(
     }
 
     // 初回生成の自動トリガー
-    LaunchedEffect(uiState.isAiReady, uiState.assets, uiState.transactions, uiState.lendings) {
-        if (uiState.isAiReady && uiState.homeAiText.isEmpty() && uiState.assets.isNotEmpty() && !uiState.isAiGenerating) {
+    LaunchedEffect(uiState.isAiReady, uiState.transactions, uiState.lendings) {
+        if (uiState.isAiReady && uiState.homeAiText.isEmpty() && !uiState.isAiGenerating) {
             viewModel.triggerHomeAnalysis()
         }
     }
@@ -121,6 +121,7 @@ fun HomeScreen(
             QuickAccessSection(
                 onInputClick = onInputClick,
                 onAssetsClick = onAssetsClick,
+                onHistoryClick = onHistoryClick,
                 onGoalClick = onGoalClick,
                 onConsultClick = { onConsultClick() }
             )
@@ -218,16 +219,14 @@ fun DashboardCard(
                 uiState.transactions.asSequence().filter { it.isExpense && it.category != "貸付" }.maxByOrNull { it.date }
             }
 
-            if (latestExpense != null) {
-                Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-                AiAnalysisSection(
-                    uiState = uiState,
-                    latestExpense = latestExpense,
-                    onRefreshAi = onRefreshAi,
-                    onAiAdviceClick = onAiAdviceClick
-                )
-            }
+            AiAnalysisSection(
+                uiState = uiState,
+                latestExpense = latestExpense,
+                onRefreshAi = onRefreshAi,
+                onAiAdviceClick = onAiAdviceClick
+            )
         }
     }
 }
@@ -526,14 +525,14 @@ fun AiAnalysisSection(
                     }
                 }
                 
-                if (latestExpense != null) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color.White, RoundedCornerShape(10.dp))
-                            .padding(8.dp)
-                    ) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White, RoundedCornerShape(10.dp))
+                        .padding(8.dp)
+                ) {
+                    if (latestExpense != null) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -551,6 +550,22 @@ fun AiAnalysisSection(
                                 Text(latestExpense.category, fontSize = 10.sp, color = NotionTextSecondary)
                             }
                             Text("¥ ${String.format(Locale.JAPAN, "%,d", latestExpense.amount)}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE57373))
+                        }
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(NotionBorder.copy(alpha = 0.3f), RoundedCornerShape(8.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Pending, null, tint = NotionTextSecondary.copy(alpha = 0.4f), modifier = Modifier.size(16.dp))
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Text("記録がありません", fontSize = 13.sp, color = NotionTextSecondary.copy(alpha = 0.4f), fontWeight = FontWeight.Medium)
                         }
                     }
                 }
@@ -591,6 +606,7 @@ fun AiAnalysisSection(
 fun QuickAccessSection(
     onInputClick: (String) -> Unit,
     onAssetsClick: () -> Unit,
+    onHistoryClick: () -> Unit,
     onGoalClick: () -> Unit,
     onConsultClick: () -> Unit,
 ) {
@@ -600,13 +616,6 @@ fun QuickAccessSection(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             QuickAccessItem(
-                label = "支出",
-                icon = Icons.Default.ShoppingCart,
-                color = Color(0xFFD32F2F),
-                onClick = { onInputClick("支出") },
-                modifier = Modifier.weight(1f)
-            )
-            QuickAccessItem(
                 label = "収入",
                 icon = Icons.Default.Payments,
                 color = NotionSafeGreen,
@@ -614,10 +623,17 @@ fun QuickAccessSection(
                 modifier = Modifier.weight(1f)
             )
             QuickAccessItem(
-                label = "振替",
-                icon = Icons.AutoMirrored.Filled.CompareArrows,
-                color = Color(0xFF1976D2),
-                onClick = { onInputClick("振替") },
+                label = "支出",
+                icon = Icons.Default.ShoppingCart,
+                color = Color(0xFFD32F2F),
+                onClick = { onInputClick("支出") },
+                modifier = Modifier.weight(1f)
+            )
+            QuickAccessItem(
+                label = "AI相談",
+                icon = Icons.Default.AutoAwesome,
+                color = Color(0xFF9C27B0),
+                onClick = onConsultClick,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -633,17 +649,17 @@ fun QuickAccessSection(
                 modifier = Modifier.weight(1f)
             )
             QuickAccessItem(
-                label = "AI相談",
-                icon = Icons.Default.AutoAwesome,
-                color = Color(0xFF9C27B0),
-                onClick = onConsultClick,
-                modifier = Modifier.weight(1f)
-            )
-            QuickAccessItem(
                 label = "目標",
                 icon = Icons.Default.Flag,
                 color = Color(0xFF00897B),
                 onClick = onGoalClick,
+                modifier = Modifier.weight(1f)
+            )
+            QuickAccessItem(
+                label = "履歴",
+                icon = Icons.Default.History,
+                color = Color(0xFF607D8B),
+                onClick = onHistoryClick,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -695,19 +711,28 @@ fun QuickAccessItem(
 }
 
 fun getCategoryIcon(category: String) = when(category) {
-    "食費" -> Icons.Default.ShoppingCart
-    "日用品" -> Icons.Default.Build
-    "交通費" -> Icons.Default.Place
-    "交際費" -> Icons.Default.Favorite
-    "娯楽" -> Icons.Default.Star
-    "美容" -> Icons.Default.Face
-    "健康" -> Icons.Default.Info
-    "その他" -> Icons.Default.MoreHoriz
+    "食生活" -> Icons.Default.Restaurant
+    "住まい" -> Icons.Default.Home
+    "インフラ" -> Icons.Default.Wifi
+    "日用雑貨" -> Icons.Default.LocalMall
+    "移動・交通" -> Icons.Default.Place
+    "健康・医療" -> Icons.Default.MedicalServices
+    "自分磨き" -> Icons.Default.School
+    "レジャー" -> Icons.Default.Star
+    "交際・贈答" -> Icons.Default.Favorite
+    "美容・装い" -> Icons.Default.Face
+    "特別な支出" -> Icons.Default.CardGiftcard
     "給与" -> Icons.Default.AccountBalance
-    "賞与" -> Icons.Default.Star
-    "副業" -> Icons.Default.Build
-    "お小遣い" -> Icons.Default.Favorite
-    "還付金" -> Icons.Default.Info
+    "事業・副業" -> Icons.Default.Build
+    "資産運用" -> Icons.Default.Savings
+    "臨時収入" -> Icons.Default.Star
+    "給付・手当" -> Icons.Default.Info
+    "還付・返金" -> Icons.Default.Refresh
+    "贈与・祝金" -> Icons.Default.Favorite
+    "ポイ活" -> Icons.Default.Payments
+    "不用品売却" -> Icons.Default.LocalMall
+    "繰越金" -> Icons.Default.History
+    "利息・配当" -> Icons.Default.ShowChart
     "貸付" -> Icons.Outlined.RequestPage
     "回収" -> Icons.Default.Handshake
     else -> Icons.Default.MoreHoriz

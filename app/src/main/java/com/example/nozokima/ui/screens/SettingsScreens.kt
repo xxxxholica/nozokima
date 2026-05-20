@@ -65,94 +65,113 @@ fun GeneralSettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(NotionBackground)
-            .verticalScroll(rememberScrollState())
     ) {
-        ScreenHeader(title = "設定")
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        Column(
-            modifier = Modifier.padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
-        ) {
-            // カスタマイズセクション
-            SettingsSection(title = "カスタマイズ") {
-                SettingsItem(
-                    icon = Icons.Default.Category,
-                    title = "カテゴリ管理",
-                    description = "収支カテゴリの追加・編集・並べ替え",
-                    onClick = onCategoryManagementClick
-                )
-            }
-
-            // セキュリティセクション
-            SettingsSection(title = "セキュリティ") {
-                SettingsItem(
-                    icon = Icons.Default.Lock,
-                    title = "アプリロック",
-                    description = "起動時にパスワード入力を求める",
-                    trailing = {
-                        Switch(
-                            checked = appLockEnabled,
-                            onCheckedChange = { onToggleAppLock(it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = NotionSafeGreen,
-                                uncheckedThumbColor = Color.White,
-                                uncheckedTrackColor = NotionBorder
-                            )
-                        )
-                    }
-                )
-                if (appLockEnabled) {
-                    HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
-                    SettingsItem(
-                        icon = Icons.Default.Password,
-                        title = "パスワードの変更",
-                        description = "現在のロック用パスワードを更新",
-                        onClick = onChangePassword
-                    )
-                    if (isBiometricAvailable) {
-                        HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
-                        SettingsItem(
-                            icon = Icons.Default.Fingerprint,
-                            title = "生体認証を使用",
-                            description = "指紋や顔認証でロックを解除する",
-                            trailing = {
-                                Switch(
-                                    checked = biometricEnabled,
-                                    onCheckedChange = { onToggleBiometric(it) },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = NotionSafeGreen,
-                                        uncheckedThumbColor = Color.White,
-                                        uncheckedTrackColor = NotionBorder
-                                    )
-                                )
-                            }
-                        )
+        ScreenHeader(
+            title = "設定",
+            navigationIcon = {
+                Surface(
+                    onClick = onBack,
+                    modifier = Modifier.size(36.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    color = NotionTextSecondary.copy(alpha = 0.1f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る", tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
                     }
                 }
             }
-
-            // データ管理セクション
-            SettingsSection(title = "データ管理") {
-                SettingsItem(
-                    icon = Icons.Default.Upload,
-                    title = "データのエクスポート",
-                    description = "現在のデータを暗号化してファイルに保存",
-                    onClick = onExportClick
-                )
-                HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsItem(
-                    icon = Icons.Default.Download,
-                    title = "データのインポート",
-                    description = "バックアップファイルからデータを復旧",
-                    onClick = onImportClick
-                )
-            }
+        )
+        
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Spacer(modifier = Modifier.height(16.dp))
             
-            Spacer(modifier = Modifier.height(100.dp))
+            Column(
+                modifier = Modifier.padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                // カスタマイズセクション
+                SettingsSection(title = "カスタマイズ") {
+                    SettingsItem(
+                        icon = Icons.Default.Category,
+                        title = "カテゴリ管理",
+                        description = "収支カテゴリの追加・編集・並べ替え",
+                        onClick = onCategoryManagementClick
+                    )
+                }
+
+                // セキュリティセクション
+                SettingsSection(title = "セキュリティ") {
+                    SettingsItem(
+                        icon = Icons.Default.Lock,
+                        title = "アプリロック",
+                        description = "起動時にパスワード入力を求める",
+                        trailing = {
+                            Switch(
+                                checked = appLockEnabled,
+                                onCheckedChange = { onToggleAppLock(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = NotionSafeGreen,
+                                    uncheckedThumbColor = Color.White,
+                                    uncheckedTrackColor = NotionBorder
+                                )
+                            )
+                        }
+                    )
+                    if (appLockEnabled) {
+                        HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                        SettingsItem(
+                            icon = Icons.Default.Password,
+                            title = "パスワードの変更",
+                            description = "現在のロック用パスワードを更新",
+                            onClick = onChangePassword
+                        )
+                        if (isBiometricAvailable) {
+                            HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                            SettingsItem(
+                                icon = Icons.Default.Fingerprint,
+                                title = "生体認証を使用",
+                                description = "指紋や顔認証でロックを解除する",
+                                trailing = {
+                                    Switch(
+                                        checked = biometricEnabled,
+                                        onCheckedChange = { onToggleBiometric(it) },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = NotionSafeGreen,
+                                            uncheckedThumbColor = Color.White,
+                                            uncheckedTrackColor = NotionBorder
+                                        )
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // データ管理セクション
+                SettingsSection(title = "データ管理") {
+                    SettingsItem(
+                        icon = Icons.Default.Upload,
+                        title = "データのエクスポート",
+                        description = "現在のデータを暗号化してファイルに保存",
+                        onClick = onExportClick
+                    )
+                    HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon = Icons.Default.Download,
+                        title = "データのインポート",
+                        description = "バックアップファイルからデータを復旧",
+                        onClick = onImportClick
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(100.dp))
+            }
         }
     }
 }
@@ -293,7 +312,7 @@ fun CategoryListScreen(
                     color = NotionTextSecondary.copy(alpha = 0.1f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る", tint = NotionTextPrimary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る", tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -422,7 +441,7 @@ fun CategoryEditScreen(
                     color = NotionTextSecondary.copy(alpha = 0.1f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る", tint = NotionTextPrimary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る", tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
                     }
                 }
             }

@@ -131,10 +131,14 @@ class HomeViewModel(
         val goalProgressRatio = if (hasGoal) (virtualBalance.toFloat() / currentGoal.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
 
         val latestExpense = state.transactions.asSequence().filter { it.isExpense && it.category != "貸付" }.maxByOrNull { it.date }
+        val hasData = state.transactions.isNotEmpty() || state.assets.any { it.amount != 0 }
 
         val prompt = buildString {
             appendLine("あなたは丁寧で実利的な家計の相棒です。")
-            if (latestExpense != null) {
+            if (!hasData) {
+                appendLine("ユーザーはまだ家計簿にデータを入力していません。")
+                appendLine("まずは資産の登録や、今日の支出を記録することから始めるよう、優しく、かつ「覗き魔」らしく少し好奇心を感じさせるような一言で促してください。")
+            } else if (latestExpense != null) {
                 appendLine("最新の支出（${latestExpense.name}: ¥${String.format(Locale.JAPAN, "%,d", latestExpense.amount)}）を踏まえ、短く鋭いアドバイスを1つだけ返してください。")
             } else {
                 appendLine("現在の資産状況を踏まえ、短く鋭いアドバイスを1つだけ返してください。")
@@ -145,11 +149,14 @@ class HomeViewModel(
             appendLine("・最後に必ず、本文の一部として自然な質問を一文添えてください。")
             appendLine("【禁止事項】自己紹介、挨拶、タメ口、精神論、長文、複数の指摘")
             appendLine("丁寧な言葉遣い（です・ます調）で、最も重要な1点に絞って伝えてください。")
-            appendLine()
-            appendLine("今月の支出合計: ¥${String.format(Locale.JAPAN, "%,d", spentThisMonth)}")
-            appendLine("月の予算: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
-            appendLine("自由に使える残高: ¥${String.format(Locale.JAPAN, "%,d", virtualBalance)}")
-            if (hasGoal) appendLine("貯金目標: ¥${String.format(Locale.JAPAN, "%,d", currentGoal.targetAmount)}（達成率${(goalProgressRatio * 100).toInt()}%）")
+            
+            if (hasData) {
+                appendLine()
+                appendLine("今月の支出合計: ¥${String.format(Locale.JAPAN, "%,d", spentThisMonth)}")
+                appendLine("月の予算: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
+                appendLine("自由に使える残高: ¥${String.format(Locale.JAPAN, "%,d", virtualBalance)}")
+                if (hasGoal) appendLine("貯金目標: ¥${String.format(Locale.JAPAN, "%,d", currentGoal.targetAmount)}（達成率${(goalProgressRatio * 100).toInt()}%）")
+            }
         }
 
         _homeAiText.value = "" 

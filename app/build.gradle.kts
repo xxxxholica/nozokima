@@ -94,4 +94,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
     implementation("net.lingala.zip4j:zip4j:2.11.5")
+    implementation("io.coil-kt:coil-compose:2.6.0")
 }

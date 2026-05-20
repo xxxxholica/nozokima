@@ -128,6 +128,7 @@ class MainActivity : FragmentActivity() {
             var recoveryLending by remember { mutableStateOf<LendingEntity?>(null) }
             var initialInputMode by remember { mutableStateOf<String?>(null) }
             var initialAssetCategoryFilter by remember { mutableStateOf<String?>(null) }
+            var initialHistoryMode by remember { mutableStateOf(false) }
             var isGoalKeypadVisible by remember { mutableStateOf(value = false) }
 
             var backupPassword by remember { mutableStateOf("") }
@@ -198,19 +199,30 @@ class MainActivity : FragmentActivity() {
                     }
                     if (dao.getCategoryCount() == 0) {
                         val defaultCategories = listOf(
-                            CategoryEntity(UUID.randomUUID().toString(), "食費", "EXPENSE", "ShoppingCart", true, 0),
-                            CategoryEntity(UUID.randomUUID().toString(), "日用品", "EXPENSE", "Build", true, 1),
-                            CategoryEntity(UUID.randomUUID().toString(), "交通費", "EXPENSE", "Place", true, 2),
-                            CategoryEntity(UUID.randomUUID().toString(), "交際費", "EXPENSE", "Favorite", true, 3),
-                            CategoryEntity(UUID.randomUUID().toString(), "娯楽", "EXPENSE", "Star", true, 4),
-                            CategoryEntity(UUID.randomUUID().toString(), "美容", "EXPENSE", "Face", true, 5),
-                            CategoryEntity(UUID.randomUUID().toString(), "健康", "EXPENSE", "Info", true, 6),
-                            CategoryEntity(UUID.randomUUID().toString(), "その他", "EXPENSE", "MoreHoriz", true, 7),
-                            CategoryEntity(UUID.randomUUID().toString(), "給与", "INCOME", "AccountBalance", true, 8),
-                            CategoryEntity(UUID.randomUUID().toString(), "賞与", "INCOME", "Star", true, 9),
-                            CategoryEntity(UUID.randomUUID().toString(), "副業", "INCOME", "Build", true, 10),
-                            CategoryEntity(UUID.randomUUID().toString(), "お小遣い", "INCOME", "Favorite", true, 11),
-                            CategoryEntity(UUID.randomUUID().toString(), "還付金", "INCOME", "Info", true, 12)
+                            CategoryEntity(UUID.randomUUID().toString(), "食生活", "EXPENSE", "Restaurant", true, 0),
+                            CategoryEntity(UUID.randomUUID().toString(), "住まい", "EXPENSE", "Home", true, 1),
+                            CategoryEntity(UUID.randomUUID().toString(), "インフラ", "EXPENSE", "Wifi", true, 2),
+                            CategoryEntity(UUID.randomUUID().toString(), "日用雑貨", "EXPENSE", "LocalMall", true, 3),
+                            CategoryEntity(UUID.randomUUID().toString(), "移動・交通", "EXPENSE", "Place", true, 4),
+                            CategoryEntity(UUID.randomUUID().toString(), "健康・医療", "EXPENSE", "MedicalServices", true, 5),
+                            CategoryEntity(UUID.randomUUID().toString(), "自分磨き", "EXPENSE", "School", true, 6),
+                            CategoryEntity(UUID.randomUUID().toString(), "レジャー", "EXPENSE", "Star", true, 7),
+                            CategoryEntity(UUID.randomUUID().toString(), "交際・贈答", "EXPENSE", "Favorite", true, 8),
+                            CategoryEntity(UUID.randomUUID().toString(), "美容・装い", "EXPENSE", "Face", true, 9),
+                            CategoryEntity(UUID.randomUUID().toString(), "特別な支出", "EXPENSE", "CardGiftcard", true, 10),
+                            CategoryEntity(UUID.randomUUID().toString(), "その他", "EXPENSE", "MoreHoriz", true, 11),
+                            CategoryEntity(UUID.randomUUID().toString(), "給与", "INCOME", "AccountBalance", true, 12),
+                            CategoryEntity(UUID.randomUUID().toString(), "事業・副業", "INCOME", "Build", true, 13),
+                            CategoryEntity(UUID.randomUUID().toString(), "資産運用", "INCOME", "Savings", true, 14),
+                            CategoryEntity(UUID.randomUUID().toString(), "臨時収入", "INCOME", "Star", true, 15),
+                            CategoryEntity(UUID.randomUUID().toString(), "給付・手当", "INCOME", "Info", true, 16),
+                            CategoryEntity(UUID.randomUUID().toString(), "還付・返金", "INCOME", "Refresh", true, 17),
+                            CategoryEntity(UUID.randomUUID().toString(), "贈与・祝金", "INCOME", "Favorite", true, 18),
+                            CategoryEntity(UUID.randomUUID().toString(), "ポイ活", "INCOME", "Payments", true, 19),
+                            CategoryEntity(UUID.randomUUID().toString(), "不用品売却", "INCOME", "LocalMall", true, 20),
+                            CategoryEntity(UUID.randomUUID().toString(), "繰越金", "INCOME", "History", true, 21),
+                            CategoryEntity(UUID.randomUUID().toString(), "利息・配当", "INCOME", "ShowChart", true, 22),
+                            CategoryEntity(UUID.randomUUID().toString(), "その他", "INCOME", "MoreHoriz", true, 23)
                         )
                         defaultCategories.forEach { dao.insertCategory(it) }
                     }
@@ -609,7 +621,14 @@ class MainActivity : FragmentActivity() {
                                                         initialHomeAdviceText = advice
                                                         selectedTab = 3
                                                     },
-                                                    onAssetsClick = { selectedTab = 2 },
+                                                    onAssetsClick = { 
+                                                        initialHistoryMode = false
+                                                        selectedTab = 2 
+                                                    },
+                                                    onHistoryClick = {
+                                                        initialHistoryMode = true
+                                                        selectedTab = 2
+                                                    },
                                                     onGoalClick = { selectedTab = 6 },
                                                     onSettingsClick = { selectedTab = 4 }
                                                 )
@@ -635,12 +654,17 @@ class MainActivity : FragmentActivity() {
                                                         selectedTab = 1
                                                     },
                                                     initialCategoryFilter = initialAssetCategoryFilter,
-                                                    onBack = { selectedTab = 0 }
+                                                    initialHistoryMode = initialHistoryMode,
+                                                    onBack = { 
+                                                        initialHistoryMode = false
+                                                        selectedTab = 0 
+                                                    }
                                                 )
                                             }
                                             3 -> {
                                                 ConsultationScreen(
                                                     dao = dao, gemini = gemini,
+                                                    ocrManager = ocrManager,
                                                     assets = homeViewModel.uiState.collectAsState().value.assets,
                                                     lendings = homeViewModel.uiState.collectAsState().value.lendings,
                                                     transactions = homeViewModel.uiState.collectAsState().value.transactions,
@@ -653,7 +677,7 @@ class MainActivity : FragmentActivity() {
                                                     initialHomeAdviceText = initialHomeAdviceText,
                                                     onClearHomeAdvice = { initialHomeAdviceText = null },
                                                     onBack = { selectedTab = 0 },
-                                                    modifier = Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding)
+                                                    modifier = Modifier.fillMaxSize().padding(top = innerPadding.calculateTopPadding()).consumeWindowInsets(innerPadding)
                                                 )
                                             }
                                             4 -> Box(Modifier.padding(innerPadding)) {
