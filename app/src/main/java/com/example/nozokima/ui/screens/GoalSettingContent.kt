@@ -29,7 +29,6 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.nozokima.model.*
 import com.example.nozokima.data.local.*
 import com.example.nozokima.data.local.entities.*
 import com.example.nozokima.data.manager.*
@@ -417,7 +416,7 @@ fun GoalSettingContent(
                     },
                     onConfirmClick = {
                         if (goalKeypadTarget == "amount") {
-                            try { targetAmountText = evaluateExpression(targetAmountText).toString() } catch (e: Exception) {}
+                            try { targetAmountText = evaluateExpression(targetAmountText).toString() } catch (_: Exception) {}
                         } else {
                             try { monthlyIncomeText = evaluateExpression(monthlyIncomeText).toString() } catch (e: Exception) {}
                         }
@@ -426,7 +425,7 @@ fun GoalSettingContent(
                     onSaveClick = {
                         if (goalKeypadTarget == "amount") {
                             if (targetAmountText.any { it in "+-*/" }) {
-                                try { targetAmountText = evaluateExpression(targetAmountText).toString() } catch (e: Exception) {}
+                                try { targetAmountText = evaluateExpression(targetAmountText).toString() } catch (_: Exception) {}
                             } else onKeypadVisibilityChange(false)
                         } else {
                             if (monthlyIncomeText.any { it in "+-*/" }) {

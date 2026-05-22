@@ -81,7 +81,7 @@ dependencies {
     implementation("net.objecthunter:exp4j:0.4.8")
 
     // ML Kit Text Recognition
-    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
     // ML Kit GenAI Prompt API (Gemini Nano)

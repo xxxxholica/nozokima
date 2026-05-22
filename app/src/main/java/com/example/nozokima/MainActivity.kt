@@ -567,10 +567,6 @@ class MainActivity : FragmentActivity() {
                                                         2 -> Box(Modifier.padding(innerPadding)) {
                                                             AssetsScreen(
                                                                 dao = dao,
-                                                                onRecoverClick = { lending ->
-                                                                    recoveryLending = lending
-                                                                    selectedTab = 1
-                                                                },
                                                                 initialHistoryMode = initialHistoryMode,
                                                                 onBack = { 
                                                                     initialHistoryMode = false

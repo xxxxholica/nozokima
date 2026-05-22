@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -71,11 +70,11 @@ import java.util.*
 
 // --- プリセット質問 ---
 private val PRESET_QUESTIONS = listOf(
-    "今月の収支を分析して",
-    "節約のアドバイスをちょうだい",
-    "無駄遣いしていないかチェックして",
-    "今の資産で目標達成できる？",
-    "貸付金の状況を教えて",
+    "今の私、少し使いすぎでしょうか？",
+    "どこを削れば、もう少しマシになりますか？",
+    "自分でも無駄遣いだと分かっているんです...",
+    "私、また何か余計なものを買いましたか？",
+    "このままだと、私の将来はどうなりますか？",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -152,17 +151,17 @@ fun ConsultationScreen(
             }
             val prompt = """
                 あなたは丁寧な言葉遣いながらも、痛いところを突き、ユーザーの浪費を煽るような皮肉めいた「家計の覗き魔」です。
-                これまでのユーザーとの会話や現在の資産状況を踏まえて、ユーザーの心をさらにざわつかせる（煽る）ための、短く鋭い「次なる問いかけ」を3つ提案してください。
+                これまでのユーザーとの会話や現在の資産状況を踏まえて、ユーザーが次にあなたへ問いかける「ユーザー自身の独り言」や「あなたへの質問」を3つ提案してください。
                 
                 $assetContext
                 
                 $historyContext
                 
                 【出力ルール】
+                ・ユーザー目線（ユーザーの口調）でのセリフのみを1行に1つ、合計3行で出力してください。
+                ・「私、またやっちゃいました？」「正直、今の私ってどう見えますか？」「どこを削れば、もう少しマシになりますか？」など、ユーザーが自分自身の行動をあなたに確認したり、自虐的に問いかけたりする表現にしてください。
                 ・回答に忠実に答えるための質問文のみを1行に1つ、合計3行で出力してください。
-                ・「楽しめましたか？」「本当に必要でしたか？」といった、本質を突く意地の悪い問いかけを優先してください。
                 ・「1.」「2.」といった数字や記号、箇条書きのマークは一切含めないでください。
-                ・丁寧な言葉遣い（です・ます調）を維持してください。
                 ・質問は20文字以内で出力してください。
                 
                 自己紹介、挨拶、タメ口、自身の回答方針への言及は禁止です。
@@ -226,7 +225,7 @@ fun ConsultationScreen(
 
                     val recentTxContext = if (transactions.isNotEmpty()) {
                         "【直近の支出記録】\n" + transactions.take(10).joinToString("\n") { 
-                            "- ${SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
+                            "- ${SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
                         } + "\n\n"
                     } else ""
 
@@ -263,7 +262,7 @@ fun ConsultationScreen(
                 } else {
                     dao.insertChatMessage(ChatMessageEntity(
                         sessionId = sessionId,
-                        text = "「${initialTransaction.name}」ですね。${initialTransaction.category}カテゴリの支出ですが、これは未来の自分への投資になりそうですか？それとも単なる浪費でしたか？",
+                        text = "「${initialTransaction.name}」ですか。私に聞く必要もありませんよね。それが未来の自分を苦しめる浪費であることくらい、ご自身が一番よく分かっているはずですから。",
                         isUser = false
                     ))
                 }
@@ -310,7 +309,7 @@ fun ConsultationScreen(
 
                     val recentTxContext = if (transactions.isNotEmpty()) {
                         "【直近の支出記録】\n" + transactions.take(10).joinToString("\n") { 
-                            "- ${SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
+                            "- ${SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
                         } + "\n\n"
                     } else ""
 
@@ -346,7 +345,7 @@ fun ConsultationScreen(
                 } else {
                     dao.insertChatMessage(ChatMessageEntity(
                         sessionId = sessionId,
-                        text = "あのアドバイスが気になりましたか？具体的にどの部分を詳しく知りたいですか？",
+                        text = "あのアドバイスが気になりましたか？ご自身の耳の痛いところを正確に突かれたようで何よりです。どの部分について、もっと現実を突きつけてほしいですか？",
                         isUser = false
                     ))
                 }
@@ -531,7 +530,7 @@ fun ConsultationScreen(
                                     }
                                     val recentTxContext = if (transactions.isNotEmpty()) {
                                         "【直近の支出記録】\n" + transactions.take(10).joinToString("\n") { 
-                                            "- ${SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
+                                            "- ${SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
                                         } + "\n\n"
                                     } else ""
                                     
@@ -662,7 +661,7 @@ fun ConsultationScreen(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            text = "${selectedTxForConsult!!.category}・${SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(selectedTxForConsult!!.date))}",
+                                            text = "${selectedTxForConsult!!.category}・${SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(selectedTxForConsult!!.date))}",
                                             color = NotionTextSecondary,
                                             fontSize = 12.sp
                                         )
@@ -846,7 +845,7 @@ fun ConsultationScreen(
 
                                             val recentTxContext = if (transactions.isNotEmpty()) {
                                                 "【直近の支出記録】\n" + transactions.take(10).joinToString("\n") { 
-                                                    "- ${SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
+                                                    "- ${SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
                                                 } + "\n\n"
                                             } else ""
 
@@ -926,7 +925,7 @@ fun ConsultationScreen(
                                     name = tx.name,
                                     amount = "¥ ${String.format(Locale.JAPAN, "%,d", tx.amount)}",
                                     memo = tx.category,
-                                    balanceAfter = SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(tx.date)),
+                                    balanceAfter = SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(tx.date)),
                                     color = Color(0xFFE57373),
                                     icon = getCategoryIcon(tx.category),
                                     onClick = {

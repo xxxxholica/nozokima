@@ -171,34 +171,6 @@ fun AssetHistoryItem(
 }
 
 @Composable
-fun AssetGroupItemRow(label: String, onClick: () -> Unit) {
-    val spec = assetTypeUiSpec(label)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(spec.accentColor.copy(alpha = 0.08f), RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(spec.icon, null, tint = spec.accentColor, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(16.dp))
-            Text(label, color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-        }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = NotionTextSecondary, modifier = Modifier.size(20.dp))
-    }
-    HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp), thickness = 0.5.dp, color = NotionBorder)
-}
-
-@Composable
 fun AssetCategoryTile(label: String, icon: ImageVector? = null, color: Color? = null, subLabel: String? = null, onClick: () -> Unit) {
     val spec = if (icon == null) assetTypeUiSpec(label) else null
     val targetIcon = icon ?: spec?.icon ?: Icons.Default.MoreHoriz

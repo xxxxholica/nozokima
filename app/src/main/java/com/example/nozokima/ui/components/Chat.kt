@@ -84,7 +84,7 @@ fun ChatBubble(message: ChatMessage) {
                             name = name,
                             amount = "¥ ${String.format(Locale.JAPAN, "%,d", amount)}",
                             memo = category,
-                            balanceAfter = SimpleDateFormat("MM/dd", Locale.JAPAN).format(Date(date)),
+                            balanceAfter = SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(date)),
                             color = Color(0xFFE57373),
                             icon = getCategoryIcon(category),
                             onLongClick = {}

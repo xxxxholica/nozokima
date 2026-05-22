@@ -22,7 +22,6 @@ import androidx.compose.ui.unit.sp
 import com.example.nozokima.model.*
 import com.example.nozokima.data.local.*
 import com.example.nozokima.data.local.entities.*
-import com.example.nozokima.data.manager.*
 import com.example.nozokima.ui.components.*
 import com.example.nozokima.util.evaluateExpression
 import com.example.nozokima.util.formatAmountWithCommas
@@ -35,7 +34,6 @@ import java.util.*
 @Composable
 fun AssetsScreen(
     dao: FinanceDao,
-    onRecoverClick: (LendingEntity) -> Unit = {},
     initialCategoryFilter: String? = null,
     initialHistoryMode: Boolean = false,
     onBack: () -> Unit = {},
@@ -790,7 +788,7 @@ fun AssetsScreen(
                     onSaveClick = {
                         val cleanAmountText = editAmountText.replace(",", "").replace("¥", "").trim()
                         val amountText = if (cleanAmountText.any { it in "+-*/" }) {
-                            try { evaluateExpression(cleanAmountText).toString() } catch (e: Exception) { cleanAmountText }
+                            try { evaluateExpression(cleanAmountText).toString() } catch (_: Exception) { cleanAmountText }
                         } else cleanAmountText
                         
                         val amount = amountText.replace("−", "-").toIntOrNull() ?: 0
@@ -903,7 +901,7 @@ fun AssetsScreen(
                                 supportingContent = { Text("資産の名称を編集します", fontSize = 12.sp) },
                                 leadingContent = { 
                                     Box(modifier = Modifier.size(40.dp).background(NotionBorder.copy(alpha = 0.4f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                                        Icon(Icons.Default.Label, contentDescription = null, tint = NotionTextSecondary, modifier = Modifier.size(20.dp))
+                                        Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null, tint = NotionTextSecondary, modifier = Modifier.size(20.dp))
                                     }
                                 },
                                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -1106,7 +1104,7 @@ fun AssetsScreen(
                         onSaveClick = {
                             val cleanAmountText = editAmountText.replace(",", "").replace("¥", "").trim()
                             val amountText = if (cleanAmountText.any { it in "+-*/" }) {
-                                try { evaluateExpression(cleanAmountText).toString() } catch (e: Exception) { cleanAmountText }
+                                try { evaluateExpression(cleanAmountText).toString() } catch (_: Exception) { cleanAmountText }
                             } else cleanAmountText
 
                             val newAmount = amountText.replace("−", "-").toIntOrNull() ?: asset.amount
@@ -1206,7 +1204,7 @@ fun ScheduledExpenseRow(
     onComplete: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val dateFormatter = remember { SimpleDateFormat("M/d", Locale.JAPAN) }
+    val dateFormatter = remember { SimpleDateFormat("MM月dd日", Locale.JAPAN) }
     
     Box(
         modifier = Modifier

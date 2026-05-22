@@ -9,20 +9,17 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.CompareArrows
-import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.RequestPage
@@ -47,9 +44,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Brush
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import com.example.nozokima.*
+
 import com.example.nozokima.model.*
 import com.example.nozokima.data.local.*
 import com.example.nozokima.data.local.entities.*
@@ -75,6 +73,14 @@ class TakePictureWithExplicitGrants : ActivityResultContracts.TakePicture() {
         }
     }
 }
+
+data class OcrPrediction(
+    val amount: String,
+    val date: Long,
+    val assetName: String,
+    val categoryName: String,
+    val memo: String
+)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -121,6 +127,8 @@ fun InputScreen(
     var showOcrOptions by remember { mutableStateOf(false) }
     
     var isAnalyzingOcr by remember { mutableStateOf(false) }
+    var ocrPredictions by remember { mutableStateOf<List<OcrPrediction>>(emptyList()) }
+    var showOcrResultPage by remember { mutableStateOf(false) }
     var successInfo by remember { mutableStateOf<SavedRecordInfo?>(null) }
 
     val memoBringIntoViewRequester = remember { BringIntoViewRequester() }
@@ -181,7 +189,7 @@ fun InputScreen(
         "AccountBalance" to Icons.Default.AccountBalance,
         "Refresh" to Icons.Default.Refresh,
         "History" to Icons.Default.History,
-        "ShowChart" to Icons.Default.ShowChart,
+        "ShowChart" to Icons.AutoMirrored.Filled.ShowChart,
         "MoreHoriz" to Icons.Default.MoreHoriz
     )
 
@@ -221,7 +229,7 @@ fun InputScreen(
                 CategoryData("ポイ活", Icons.Default.Payments),
                 CategoryData("不用品売却", Icons.Default.LocalMall),
                 CategoryData("繰越金", Icons.Default.History),
-                CategoryData("利息・配当", Icons.Default.ShowChart),
+                CategoryData("利息・配当", Icons.AutoMirrored.Filled.ShowChart),
                 CategoryData("その他", Icons.Default.MoreHoriz)
             )
         }
@@ -229,6 +237,7 @@ fun InputScreen(
 
     fun processOcrWithAi(uri: Uri) {
         isAnalyzingOcr = true
+        showOcrResultPage = true
         scope.launch {
             try {
                 val fullText = ocrManager?.extractFullText(uri)
@@ -251,6 +260,11 @@ fun InputScreen(
                 val prompt = """
                     あなたは家計簿の入力補助を行うAIです。提供されたレシートのテキストから、正確に金額、日付、支払元資産、ジャンル、品目（メモ）を抽出してください。
                     
+                    必ず3つの異なる推測パターンを提示してください。
+                    パターン1: 最も可能性が高い標準的な解釈
+                    パターン2: 店名や品目が異なる別の可能性（または合算金額の別の候補）
+                    パターン3: 別の解釈や簡略化した内容
+                    
                     【レシートテキスト】
                     $fullText
                     
@@ -261,14 +275,21 @@ fun InputScreen(
                     $categoryNames
                     
                     【抽出ルール】
-                    1. 金額 (AMOUNT): 支払い合計金額を数値のみで。カンマは不要です。
-                    2. 日付 (DATE): レシートに記載された日付を YYYY/MM/DD 形式で。記載がない場合は今日の日付 ($today) にしてください。
-                    3. 資産 (ASSET): 候補リストの中から最も適切な支払元を選んでください。判断できない場合は「未選択」としてください。
-                    4. ジャンル (GENRE): 候補リストの中から最も適切な支出ジャンルを「ジャンルの候補」の中から1つ選んでください。候補にない場合は「その他」としてください。
-                    5. 品目 (MEMO): 店名や主要な購入品を20文字以内で簡潔に。
+                    1. 金額 (AMOUNT): 支払い合計金額を数値のみで。
+                    2. 日付 (DATE): YYYY/MM/DD 形式で。記載がない場合は今日の日付 ($today) にしてください。
+                    3. 資産 (ASSET): 候補リストから選んでください。
+                    4. ジャンル (GENRE): 候補リストから選んでください。
+                    5. 品目 (MEMO): 20文字以内で。
+                    
+                    【注意事項】
+                    ・情報を読み取れない場合でも、前後の文脈からできるだけ推測して埋めてください。
+                    ・「不明」「解析不能」「データなし」などの言葉は絶対に使用しないでください。
+                    ・どうしても特定できない項目は、無理に埋めず空欄のままにしてください。
+                    ・金額が特定できない場合は、そのパターン自体を出力しないでください。
                     
                     【出力形式】
-                    必ず以下の形式で、値のみを返してください。説明は一切不要です。
+                    必ず以下の形式を3回繰り返してください。説明は一切不要です。
+                    ---PATTERN---
                     AMOUNT: [数値]
                     DATE: [YYYY/MM/DD]
                     ASSET: [資産名]
@@ -278,45 +299,62 @@ fun InputScreen(
 
                 val response = gemini.generateResponse(prompt)
                 
-                val lines = response.lines()
-                lines.forEach { line ->
-                    val trimmed = line.trim()
-                    when {
-                        trimmed.startsWith("AMOUNT:") -> {
-                            val value = trimmed.substringAfter("AMOUNT:").trim().filter { it.isDigit() }
-                            if (value.isNotEmpty()) amountText = formatAmountWithCommas(value)
-                        }
-                        trimmed.startsWith("DATE:") -> {
-                            val dateStr = trimmed.substringAfter("DATE:").trim()
-                            val format = SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN)
-                            try {
-                                val date = format.parse(dateStr)
-                                if (date != null) selectedDate = date.time
-                            } catch (_: Exception) {}
-                        }
-                        trimmed.startsWith("ASSET:") -> {
-                            val assetName = trimmed.substringAfter("ASSET:").trim()
-                            if (assetName != "未選択") {
-                                val foundAsset = dbAssets.find { it.name == assetName }
-                                if (foundAsset != null) {
-                                    selectedAssetEntity = foundAsset
-                                }
+                val predictions = mutableListOf<OcrPrediction>()
+                val patternSections = response.split("---PATTERN---").filter { it.contains("AMOUNT:") }
+                
+                patternSections.take(3).forEach { section ->
+                    var pAmount = ""
+                    var pDate = selectedDate
+                    var pAsset = "未選択"
+                    var pGenre = "その他"
+                    var pMemo = ""
+                    
+                    section.lines().forEach { line ->
+                        val trimmed = line.trim()
+                        when {
+                            trimmed.startsWith("AMOUNT:") -> pAmount = trimmed.substringAfter("AMOUNT:").trim().filter { it.isDigit() }
+                            trimmed.startsWith("DATE:") -> {
+                                val dateStr = trimmed.substringAfter("DATE:").trim()
+                                try {
+                                    val date = SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN).parse(dateStr)
+                                    if (date != null) pDate = date.time
+                                } catch (_: Exception) {}
                             }
+                            trimmed.startsWith("ASSET:") -> pAsset = trimmed.substringAfter("ASSET:").trim()
+                            trimmed.startsWith("GENRE:") -> pGenre = trimmed.substringAfter("GENRE:").trim()
+                            trimmed.startsWith("MEMO:") -> pMemo = trimmed.substringAfter("MEMO:").trim()
                         }
-                        trimmed.startsWith("GENRE:") -> {
-                            val categoryName = trimmed.substringAfter("GENRE:").trim()
-                            val foundCategory = expenseCategories.find { it.name == categoryName }
-                            if (foundCategory != null) {
-                                selectedCategory = foundCategory
-                            }
-                        }
-                        trimmed.startsWith("MEMO:") -> {
-                            val memo = trimmed.substringAfter("MEMO:").trim()
-                            if (memo != "[内容]" && memo.isNotEmpty()) memoText = memo
+                    }
+                    
+                    if (pAmount.isNotEmpty() && pAmount != "0") {
+                        val finalMemo = pMemo.trim().ifEmpty { "レシート内容" }
+                        // AIが「不明」といった文言を返した場合や、内容が空すぎる場合は候補から外す
+                        if (!finalMemo.contains("不明") && !finalMemo.contains("解析") &&
+                            !pAsset.contains("不明") && !pGenre.contains("不明")) {
+                            predictions.add(OcrPrediction(
+                                amount = formatAmountWithCommas(pAmount),
+                                date = pDate,
+                                assetName = pAsset,
+                                categoryName = pGenre,
+                                memo = finalMemo
+                            ))
                         }
                     }
                 }
+                
+                ocrPredictions = predictions
+                
+                // デフォルトで最初の候補をメイン画面に反映
+                predictions.firstOrNull()?.let { first ->
+                    amountText = first.amount
+                    selectedDate = first.date
+                    memoText = first.memo
+                    dbAssets.find { it.name == first.assetName }?.let { selectedAssetEntity = it }
+                    expenseCategories.find { it.name == first.categoryName }?.let { selectedCategory = it }
+                }
+
                 snackbarHostState.showSnackbar("AIによる分析が完了しました")
+                showOcrResultPage = true
             } catch (e: Exception) {
                 snackbarHostState.showSnackbar("分析中にエラーが発生しました: ${e.message}")
             } finally {
@@ -513,8 +551,7 @@ fun InputScreen(
                     }
                     "回収" -> {
                         selectedLending?.let { lending ->
-                            val currentRecoveryAmount = amountValue
-                            val newTotalRecovered = lending.recoveredAmount + currentRecoveryAmount
+                            val newTotalRecovered = lending.recoveredAmount + amountValue
                             val isFullyRecovered = newTotalRecovered >= lending.amount
                             
                             val updatedLending = lending.copy(
@@ -572,9 +609,11 @@ fun InputScreen(
                             val advice = gemini.generateResponse(prompt)
                             successInfo = successInfo?.copy(aiAdvice = advice)
                         } catch (e: Exception) {
-                            successInfo = successInfo?.copy(aiAdvice = "記録が完了しました！")
+                            successInfo = successInfo?.copy(aiAdvice = "おや、記録だけは一人前ですね。それで、いつになったら貯金という文字を覚えるのでしょうか？")
                         }
                     }
+                } else {
+                    successInfo = successInfo?.copy(aiAdvice = "おや、記録だけは一人前ですね。それで、いつになったら貯金という文字を覚えるのでしょうか？")
                 }
                 
                 // リセット
@@ -1015,7 +1054,7 @@ fun InputScreen(
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .background(
-                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        brush = Brush.verticalGradient(
                             colors = listOf(Color.Transparent, NotionBackground.copy(alpha = 0.9f), NotionBackground),
                             startY = 0f
                         )
@@ -1051,7 +1090,12 @@ fun InputScreen(
             }
         }
 
-        SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.TopCenter).padding(top = 100.dp))
+        SnackbarHost(
+            hostState = snackbarHostState, 
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = if (isKeyboardVisible) 0.dp else 100.dp)
+        )
 
         if (showKeypad) {
             ModalBottomSheet(
@@ -1080,13 +1124,13 @@ fun InputScreen(
                     onConfirmClick = {
                         try {
                             amountText = formatAmountWithCommas(evaluateExpression(amountText).toString())
-                        } catch (e: Exception) {}
+                        } catch (_: Exception) {}
                     },
                     onSaveClick = {
                         if (amountText.any { it in "+-*/" }) {
                             try {
                                 amountText = formatAmountWithCommas(evaluateExpression(amountText).toString())
-                            } catch (e: Exception) {}
+                            } catch (_: Exception) {}
                         } else {
                             // 金額を確定させてキーパッドを閉じるだけにする（記録は画面下部のボタンで行う）
                             showKeypad = false
@@ -1334,6 +1378,320 @@ fun InputScreen(
                 info = info,
                 onDismiss = { successInfo = null }
             )
+        }
+
+        if (showOcrResultPage) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = NotionBackground
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        ScreenHeader(
+                            title = "レシート読み取り",
+                            navigationIcon = {
+                                Surface(
+                                    onClick = { showOcrResultPage = false },
+                                    modifier = Modifier.size(36.dp),
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = NotionTextSecondary.copy(alpha = 0.1f)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Close, contentDescription = "閉じる", tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                            }
+                        )
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 24.dp)
+                        ) {
+                            if (isAnalyzingOcr) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(rememberScrollState())
+                                ) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    repeat(3) {
+                                        PatternCardSkeleton()
+                                    }
+                                }
+                            } else if (ocrPredictions.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(80.dp)
+                                                .background(NotionBorder.copy(alpha = 0.2f), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.List,
+                                                contentDescription = null,
+                                                tint = NotionTextSecondary.copy(alpha = 0.6f),
+                                                modifier = Modifier.size(40.dp)
+                                            )
+                                            // 失敗を示すバツ印を重ねる
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = null,
+                                                tint = Color(0xFFD32F2F).copy(alpha = 0.6f),
+                                                modifier = Modifier.size(24.dp).align(Alignment.BottomEnd).padding(bottom = 8.dp, end = 8.dp)
+                                            )
+                                        }
+                                        Spacer(Modifier.height(20.dp))
+                                        Text(
+                                            "レシートの読み取りに失敗しました",
+                                            color = NotionTextSecondary,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = TextAlign.Center
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            "明るい場所で再度お試しください",
+                                            color = NotionTextSecondary.copy(alpha = 0.6f),
+                                            fontSize = 12.sp,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            } else {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(rememberScrollState())
+                                ) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    ocrPredictions.forEachIndexed { index, prediction ->
+                                        val isSelected = amountText == prediction.amount && memoText == prediction.memo
+                                        
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(bottom = 12.dp)
+                                                .clickable {
+                                                    amountText = prediction.amount
+                                                    selectedDate = prediction.date
+                                                    memoText = prediction.memo
+                                                    dbAssets.find { it.name == prediction.assetName }?.let { selectedAssetEntity = it }
+                                                    expenseCategories.find { it.name == prediction.categoryName }?.let { selectedCategory = it }
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                },
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = Color.White,
+                                            border = BorderStroke(1.2.dp, if (isSelected) accentColor else NotionBorder)
+                                        ) {
+                                            Column(modifier = Modifier.padding(16.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Surface(
+                                                            modifier = Modifier.size(24.dp),
+                                                            shape = CircleShape,
+                                                            color = if (isSelected) accentColor else NotionTextSecondary.copy(alpha = 0.1f)
+                                                        ) {
+                                                            Box(contentAlignment = Alignment.Center) {
+                                                                Text(
+                                                                    text = (index + 1).toString(),
+                                                                    color = if (isSelected) Color.White else NotionTextSecondary,
+                                                                    fontSize = 12.sp,
+                                                                    fontWeight = FontWeight.Bold
+                                                                )
+                                                            }
+                                                        }
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                        Text("パターン ${index + 1}", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                    if (isSelected) {
+                                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = accentColor, modifier = Modifier.size(20.dp))
+                                                    }
+                                                }
+                                                
+                                                Spacer(modifier = Modifier.height(12.dp))
+                                                
+                                                Row(verticalAlignment = Alignment.Bottom) {
+                                                    Text("¥", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = accentColor, modifier = Modifier.padding(bottom = 4.dp))
+                                                    Spacer(modifier = Modifier.width(2.dp))
+                                                    Text(prediction.amount, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = accentColor, letterSpacing = (-1).sp)
+                                                }
+                                                
+                                                Text(prediction.memo, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NotionTextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                
+                                                Spacer(modifier = Modifier.height(12.dp))
+                                                
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    PredictionTag(prediction.categoryName, accentColor)
+                                                    PredictionTag(prediction.assetName, NotionTextSecondary)
+                                                    PredictionTag(SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(prediction.date)), NotionTextSecondary)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(100.dp))
+                                }
+                            }
+                        }
+
+                        // Bottom Action Button
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                        colors = listOf(Color.Transparent, NotionBackground.copy(alpha = 0.9f), NotionBackground),
+                                        startY = 0f
+                                    )
+                                )
+                                .padding(horizontal = 24.dp)
+                                .padding(top = 24.dp, bottom = 24.dp)
+                        ) {
+                            Button(
+                                onClick = { showOcrResultPage = false },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(56.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = accentColor
+                                ),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Text(
+                                    text = "完了",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PredictionTag(text: String, color: Color) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = color.copy(alpha = 0.08f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.12f))
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            fontSize = 11.sp,
+            color = color,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+fun PatternCardSkeleton() {
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val translateAnim by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmer"
+    )
+
+    val shimmerBrush = Brush.linearGradient(
+        colors = listOf(
+            Color.LightGray.copy(alpha = 0.3f),
+            Color.LightGray.copy(alpha = 0.5f),
+            Color.LightGray.copy(alpha = 0.3f),
+        ),
+        start = androidx.compose.ui.geometry.Offset(translateAnim - 300f, 0f),
+        end = androidx.compose.ui.geometry.Offset(translateAnim, 0f)
+    )
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = Color.White,
+        border = BorderStroke(1.2.dp, NotionBorder)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(shimmerBrush)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .width(80.dp)
+                        .height(14.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(shimmerBrush)
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Row(verticalAlignment = Alignment.Bottom) {
+                Box(
+                    modifier = Modifier
+                        .width(120.dp)
+                        .height(28.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(shimmerBrush)
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.7f)
+                    .height(16.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(shimmerBrush)
+            )
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                repeat(3) {
+                    Box(
+                        modifier = Modifier
+                            .width(60.dp)
+                            .height(20.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(shimmerBrush)
+                    )
+                }
+            }
         }
     }
 }
