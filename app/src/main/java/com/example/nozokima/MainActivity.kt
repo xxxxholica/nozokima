@@ -460,7 +460,19 @@ class MainActivity : FragmentActivity() {
                 else selectedTab = 0
             }
 
-            Surface(modifier = Modifier.fillMaxSize(), color = NotionBackground) {
+            val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        focusManager.clearFocus()
+                    },
+                color = NotionBackground
+            ) {
                 if (isLoading) {
                     // 読み込み中（一瞬のチラつき防止）
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

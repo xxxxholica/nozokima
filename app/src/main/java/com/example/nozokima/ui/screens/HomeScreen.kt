@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.nozokima.data.local.FinanceDao
@@ -441,7 +442,7 @@ fun AiAnalysisSection(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 210.dp)
+            .height(210.dp)
             .background(Color(0xFFF5F5F5), RoundedCornerShape(16.dp))
             .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
             .padding(12.dp),
@@ -596,7 +597,14 @@ fun AiAnalysisSection(
                         )
                     }
                 } else if (uiState.homeAiText.isNotEmpty()) {
-                    Text(uiState.homeAiText, color = NotionTextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
+                    Text(
+                        text = uiState.homeAiText,
+                        color = NotionTextSecondary,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }

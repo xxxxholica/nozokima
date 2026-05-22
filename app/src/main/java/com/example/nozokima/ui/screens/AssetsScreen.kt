@@ -106,6 +106,7 @@ fun AssetsScreen(
     // 資産編集シート用
     var editingAssetEntity by remember { mutableStateOf<AssetEntity?>(null) }
     var showAssetAmountEdit by remember { mutableStateOf(false) }
+    var showAssetNameEdit by remember { mutableStateOf(false) }
     var showAssetDeleteConfirm by remember { mutableStateOf(false) }
 
     val assetCategoryOrder = remember(assetGroups) {
@@ -684,13 +685,13 @@ fun AssetsScreen(
     }
 
     if (showAddItemDialog) {
-        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
         ModalBottomSheet(
             onDismissRequest = { showAddItemDialog = false },
             containerColor = Color.White,
             dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {
+            val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
             val spec = assetTypeUiSpec(selectedGroupTitle)
             Column(
                 modifier = Modifier
@@ -847,7 +848,7 @@ fun AssetsScreen(
 
     // --- 残高内訳 資産タップ時のアクションメニュー ---
     editingAssetEntity?.let { asset ->
-        if (!showAssetAmountEdit && !showAssetDeleteConfirm) {
+        if (!showAssetAmountEdit && !showAssetNameEdit && !showAssetDeleteConfirm) {
             val spec = assetTypeUiSpec(asset.category)
             ModalBottomSheet(
                 onDismissRequest = { editingAssetEntity = null },
@@ -898,6 +899,21 @@ fun AssetsScreen(
                     ) {
                         Column {
                             ListItem(
+                                headlineContent = { Text("名称を変更する", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
+                                supportingContent = { Text("資産の名称を編集します", fontSize = 12.sp) },
+                                leadingContent = { 
+                                    Box(modifier = Modifier.size(40.dp).background(NotionBorder.copy(alpha = 0.4f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Label, contentDescription = null, tint = NotionTextSecondary, modifier = Modifier.size(20.dp))
+                                    }
+                                },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                modifier = Modifier.clickable {
+                                    editNameText = asset.name
+                                    showAssetNameEdit = true
+                                }
+                            )
+                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = NotionBorder)
+                            ListItem(
                                 headlineContent = { Text("金額を修正する", fontSize = 15.sp, fontWeight = FontWeight.Medium) },
                                 supportingContent = { Text("現在の残高を直接書き換えます", fontSize = 12.sp) },
                                 leadingContent = { 
@@ -924,6 +940,94 @@ fun AssetsScreen(
                                 modifier = Modifier.clickable { showAssetDeleteConfirm = true }
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- 名称編集シート ---
+    if (showAssetNameEdit) {
+        val asset = editingAssetEntity
+        if (asset != null) {
+            val spec = assetTypeUiSpec(asset.category)
+            ModalBottomSheet(
+                onDismissRequest = { showAssetNameEdit = false; editingAssetEntity = null },
+                containerColor = Color.White,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(spec.accentColor.copy(alpha = 0.1f), RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(spec.icon, null, tint = spec.accentColor, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(text = "名称を変更", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = NotionTextPrimary)
+                    }
+                    
+                    Spacer(Modifier.height(24.dp))
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.White,
+                        border = BorderStroke(1.dp, NotionBorder)
+                    ) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
+                                Icon(Icons.Default.Label, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("資産の名称", fontSize = 12.sp, color = NotionTextSecondary)
+                                androidx.compose.foundation.text.BasicTextField(
+                                    value = editNameText,
+                                    onValueChange = { editNameText = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    textStyle = androidx.compose.ui.text.TextStyle(color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                                    decorationBox = { inner ->
+                                        if (editNameText.isEmpty()) Text("名称を入力", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
+                                        inner()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(32.dp))
+
+                    Button(
+                        onClick = {
+                            if (editNameText.isNotBlank()) {
+                                val oldName = asset.name
+                                val newName = editNameText.trim()
+                                scope.launch {
+                                    dao.updateAsset(asset.copy(name = newName, lastUpdated = System.currentTimeMillis()))
+                                    if (oldName != newName) {
+                                        dao.updateTransactionAssetName(oldName, newName)
+                                        dao.updateTransactionToAssetName(oldName, newName)
+                                        dao.updateScheduledExpenseAssetName(oldName, newName)
+                                        dao.updateLendingLoanAsset(oldName, newName)
+                                        dao.updateLendingReturnAsset(oldName, newName)
+                                    }
+                                }
+                                showAssetNameEdit = false
+                                editingAssetEntity = null
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = spec.accentColor),
+                        shape = RoundedCornerShape(16.dp),
+                        enabled = editNameText.isNotBlank()
+                    ) {
+                        Text("保存する", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

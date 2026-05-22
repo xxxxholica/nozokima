@@ -42,6 +42,21 @@ interface FinanceDao {
     @Query("SELECT * FROM assets WHERE name = :assetName LIMIT 1")
     suspend fun getAssetByName(assetName: String): AssetEntity?
 
+    @Query("UPDATE transactions SET assetName = :newName WHERE assetName = :oldName")
+    suspend fun updateTransactionAssetName(oldName: String, newName: String)
+
+    @Query("UPDATE transactions SET toAssetName = :newName WHERE toAssetName = :oldName")
+    suspend fun updateTransactionToAssetName(oldName: String, newName: String)
+
+    @Query("UPDATE scheduled_expenses SET assetName = :newName WHERE assetName = :oldName")
+    suspend fun updateScheduledExpenseAssetName(oldName: String, newName: String)
+
+    @Query("UPDATE lendings SET loanAsset = :newName WHERE loanAsset = :oldName")
+    suspend fun updateLendingLoanAsset(oldName: String, newName: String)
+
+    @Query("UPDATE lendings SET returnAsset = :newName WHERE returnAsset = :oldName")
+    suspend fun updateLendingReturnAsset(oldName: String, newName: String)
+
     @Delete
     suspend fun deleteTransaction(transaction: TransactionEntity)
 
