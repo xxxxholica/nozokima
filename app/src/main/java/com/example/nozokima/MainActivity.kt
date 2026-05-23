@@ -30,7 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -128,7 +128,7 @@ class MainActivity : FragmentActivity() {
             var initialHomeAdviceText by remember { mutableStateOf<String?>(null) }
             var recoveryLending by remember { mutableStateOf<LendingEntity?>(null) }
             var initialInputMode by remember { mutableStateOf<String?>(null) }
-            var initialHistoryMode by remember { mutableStateOf(false) }
+            var initialHistoryMode by remember { mutableStateOf(value = false) }
             var isGoalKeypadVisible by remember { mutableStateOf(value = false) }
 
             var backupPassword by remember { mutableStateOf("") }
@@ -140,7 +140,7 @@ class MainActivity : FragmentActivity() {
 
             val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
-            val isAppLocked = rememberSaveable { mutableStateOf(true) }
+            val isAppLocked = rememberSaveable { mutableStateOf(value = true) }
             val isExternalActivityLaunching = rememberSaveable { mutableStateOf(false) }
             val appSettings = mainUiState.appSettings ?: AppSettingsEntity()
             val isLoading = !mainUiState.isLoaded
@@ -191,7 +191,8 @@ class MainActivity : FragmentActivity() {
                 mainViewModel.checkAiStatus()
             }
 
-            val activity = LocalContext.current as? android.app.Activity
+            val context = LocalContext.current
+            val activity = remember(context) { context as? android.app.Activity }
             DisposableEffect(showBackupPasswordDialog) {
                 if (showBackupPasswordDialog && (backupMode == "export")) {
                     activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
@@ -211,14 +212,14 @@ class MainActivity : FragmentActivity() {
                     onDismissRequest = { showAppLockPasswordDialog = false },
                     containerColor = Color.White,
                     dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
-                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 32.dp)
                             .padding(bottom = 40.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         val title = when(appLockDialogMode) {
                             "set" -> if (step == 0) "パスワードの設定" else "パスワードの確認"
@@ -293,7 +294,7 @@ class MainActivity : FragmentActivity() {
                             onConfirmClick = {
                                 when {
                                     isDisableMode -> {
-                                        if (appSettings.appLockPassword != null && currentPasswordInput == appSettings.appLockPassword) {
+                                        if ((appSettings.appLockPassword != null) && (currentPasswordInput == appSettings.appLockPassword)) {
                                             scope.launch {
                                                 dao.upsertAppSettings(appSettings.copy(isAppLockEnabled = false, isBiometricEnabled = false))
                                                 showAppLockPasswordDialog = false
@@ -402,12 +403,15 @@ class MainActivity : FragmentActivity() {
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                                    TextButton(onClick = { 
-                                        val p = generateSecurePassword()
-                                        passwordText = p
-                                        confirmPasswordText = p
-                                        isPasswordVisible = true
-                                    }, colors = ButtonDefaults.textButtonColors(contentColor = NotionSafeGreen)) {
+                                    TextButton(
+                                        onClick = { 
+                                            val p = generateSecurePassword()
+                                            passwordText = p
+                                            confirmPasswordText = p
+                                            isPasswordVisible = true
+                                        },
+                                        colors = ButtonDefaults.textButtonColors(contentColor = NotionSafeGreen)
+                                    ) {
                                         Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(8.dp))
                                         Text("安全なパスワードを生成")
@@ -456,8 +460,7 @@ class MainActivity : FragmentActivity() {
             }
 
             androidx.activity.compose.BackHandler(enabled = selectedTab != 0) {
-                if (selectedTab == 5) selectedTab = 4
-                else selectedTab = 0
+                selectedTab = if (selectedTab == 5) 4 else 0
             }
 
             val focusManager = androidx.compose.ui.platform.LocalFocusManager.current

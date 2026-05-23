@@ -55,7 +55,7 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
 
     val greeting = remember {
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val hour = Calendar.getInstance()[Calendar.HOUR_OF_DAY]
         when (hour) {
             in 5..10 -> "おはようございます ☀️"
             in 11..16 -> "こんにちは 😊"
@@ -169,10 +169,10 @@ fun DashboardCard(
             .sumOf { it.amount }
     }.toLong()
 
-    val isGoalSet = uiState.goalSetting != null && uiState.goalSetting.showResults && uiState.goalSetting.targetAmount > 0
+    val isGoalSet = (uiState.goalSetting != null) && uiState.goalSetting.showResults && (uiState.goalSetting.targetAmount > 0)
     val goalMonthlyBudget = remember(uiState.goalSetting, virtualBalance, isGoalSet) {
-        val currentGoal = uiState.goalSetting
-        if (isGoalSet && currentGoal != null) {
+        if (isGoalSet) {
+            val currentGoal = uiState.goalSetting
             val remainingDays = ((currentGoal.targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
             val remainingMonths = (remainingDays / 30.0).coerceAtLeast(0.1)
             val totalExpectedIncome = (currentGoal.monthlyIncome * remainingMonths).toLong()
@@ -314,7 +314,7 @@ fun BudgetProgressSection(monthlyBudget: Long, spentThisMonth: Long, onBudgetCli
         }
         Spacer(modifier = Modifier.height(8.dp))
         
-        var progressTrigger by remember { mutableStateOf(false) }
+        var progressTrigger by remember { mutableStateOf(value = false) }
         LaunchedEffect(Unit) { progressTrigger = true }
         
         // spentThisMonthが0の場合は進捗バーを空にする（逆転して「残り100%」を表現）
@@ -355,7 +355,7 @@ fun GoalProgressSection(
 
     val goalDisplayTitle = when {
         !hasGoal -> "目標未設定"
-        (goalSetting?.title?.isNotEmpty() == true) -> goalSetting.title
+        (goalSetting.title.isNotEmpty()) -> goalSetting.title
         else -> "目標の貯金"
     }
 
@@ -547,8 +547,8 @@ fun AiAnalysisSection(
                             }
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(latestExpense.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NotionTextPrimary, maxLines = 1)
-                                Text(latestExpense.category, fontSize = 10.sp, color = NotionTextSecondary)
+                                Text(latestExpense.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NotionTextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(latestExpense.category, fontSize = 10.sp, color = NotionTextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             Text("¥ ${String.format(Locale.JAPAN, "%,d", latestExpense.amount)}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE57373))
                         }
@@ -712,7 +712,9 @@ fun QuickAccessItem(
                 text = label,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = NotionTextPrimary
+                color = NotionTextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

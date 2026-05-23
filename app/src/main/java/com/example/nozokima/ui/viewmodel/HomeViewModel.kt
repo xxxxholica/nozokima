@@ -32,7 +32,7 @@ data class HomeUiState(
 )
 
 class HomeViewModel(
-    private val dao: FinanceDao,
+    dao: FinanceDao,
     private val gemini: GeminiNanoModel,
 ) : ViewModel() {
 
@@ -86,7 +86,7 @@ class HomeViewModel(
             aiStatus = aiStatus,
             isAiReady = isAiReady,
             isAiCheckingStatus = isAiChecking,
-            isAiInitialized = isAiInitialized
+            isAiInitialized = isAiInitialized,
         )
     }.flowOn(Dispatchers.Default)
     .stateIn(
@@ -102,7 +102,7 @@ class HomeViewModel(
         // データの計算 (in background via Flow combination or here if needed immediately)
         val totalLendingAmount = state.lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
         val currentAssets = state.assets.sumOf { it.amount } + totalLendingAmount
-        val upcomingTotal = state.scheduledExpenses.filter { !it.isCompleted }.sumOf { it.amount }
+        val upcomingTotal = state.scheduledExpenses.asSequence().filter { !it.isCompleted }.sumOf { it.amount }
         val virtualBalance = currentAssets - upcomingTotal
 
         val calendar = Calendar.getInstance().apply {
@@ -120,7 +120,7 @@ class HomeViewModel(
         val defaultBudget = state.budgets.sumOf { it.monthlyAmount }.let { if (it == 0) 100000L else it.toLong() }
         
         val currentGoal = state.goalSetting
-        val goalMonthlyBudget = if (currentGoal != null && currentGoal.showResults && currentGoal.targetAmount > 0) {
+        val goalMonthlyBudget = if ((currentGoal != null) && currentGoal.showResults && (currentGoal.targetAmount > 0)) {
             val remainingDays = ((currentGoal.targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
             val remainingMonths = (remainingDays / 30.0).coerceAtLeast(0.1)
             val totalExpectedIncome = (currentGoal.monthlyIncome * remainingMonths).toLong()
@@ -164,7 +164,7 @@ class HomeViewModel(
                 appendLine("今月の支出合計: ¥${String.format(Locale.JAPAN, "%,d", spentThisMonth)}")
                 appendLine("月の予算: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
                 appendLine("自由に使える残高: ¥${String.format(Locale.JAPAN, "%,d", virtualBalance)}")
-                if (hasGoal) appendLine("貯金目標: ¥${String.format(Locale.JAPAN, "%,d", currentGoal.targetAmount)}（達成率${(goalProgressRatio * 100).toInt()}%）")
+                if (hasGoal) appendLine("貯金目標: ¥${String.format(Locale.JAPAN, "%,d", currentGoal.targetAmount)}（達成率${goalProgressRatio * 100}%）")
             }
         }
 
@@ -188,9 +188,9 @@ class HomeViewModel(
         val currentGoal = state.goalSetting ?: return
         if (currentGoal.targetAmount <= 0L) return
 
-        val totalLendingAmount = state.lendings.filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
+        val totalLendingAmount = state.lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
         val currentAssets = state.assets.sumOf { it.amount } + totalLendingAmount
-        val upcomingTotal = state.scheduledExpenses.filter { !it.isCompleted }.sumOf { it.amount }
+        val upcomingTotal = state.scheduledExpenses.asSequence().filter { !it.isCompleted }.sumOf { it.amount }
         val virtualBalance = currentAssets - upcomingTotal
 
         val remainingDays = ((currentGoal.targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
@@ -224,7 +224,7 @@ class HomeViewModel(
             appendLine("目標: ${currentGoal.title}")
             appendLine("目標金額: ¥${String.format(Locale.JAPAN, "%,d", currentGoal.targetAmount)}")
             appendLine("自由に使える残高: ¥${String.format(Locale.JAPAN, "%,d", virtualBalance)}（達成率$progressPercent%）")
-            appendLine("期限まで: $remainingDays 日（期間経過率${timeProgressPercent}%）")
+            appendLine("期限まで: $remainingDays 日（期間経過率$timeProgressPercent%）")
             appendLine("今後の月予算目安: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
             
             if (progressPercent < timeProgressPercent) {

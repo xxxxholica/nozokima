@@ -4,16 +4,13 @@ package com.example.nozokima.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -40,7 +37,7 @@ fun ScreenHeader(
     titleStyle: androidx.compose.ui.text.TextStyle = androidx.compose.ui.text.TextStyle(
         fontSize = 24.sp,
         fontWeight = FontWeight.Bold,
-        letterSpacing = (-0.5).sp
+        letterSpacing = (-0.5).sp,
     ),
     titleMaxLines: Int = Int.MAX_VALUE,
     titleOverflow: TextOverflow = TextOverflow.Clip,
@@ -66,7 +63,7 @@ fun ScreenHeader(
             maxLines = titleMaxLines,
             overflow = titleOverflow
         )
-        if (trailingContent != null) trailingContent()
+        trailingContent?.invoke()
     }
 }
 
@@ -114,8 +111,8 @@ fun UnifiedAssetCardRow(
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-            Text(subtitle, color = NotionTextSecondary, fontSize = 12.sp, maxLines = 1)
+            Text(title, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = NotionTextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(modifier = Modifier.width(8.dp))
         Text(
@@ -162,8 +159,8 @@ fun AssetHistoryItem(
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column {
-                Text(name, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                Text("$memo・$balanceAfter", color = NotionTextSecondary, fontSize = 12.sp)
+                Text(name, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("$memo・$balanceAfter", color = NotionTextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         Text(amount, color = color, fontSize = 15.sp, fontWeight = FontWeight.Bold)

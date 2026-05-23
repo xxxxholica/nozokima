@@ -1,8 +1,10 @@
+import com.android.build.api.dsl.ApplicationExtension
+
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("com.google.devtools.ksp")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.google.devtools.ksp)
 }
 
 val isWindows = System.getProperty("os.name").lowercase().contains("win")
@@ -14,13 +16,13 @@ if (isWindows) {
         if (tmpDir.exists() && tmpDir.canWrite()) {
             System.setProperty("java.io.tmpdir", tmpDir.absolutePath)
         }
-    } catch (e: Exception) {
+    } catch (_: Exception) {
     }
 }
 
-android {
+extensions.configure<ApplicationExtension> {
     namespace = "com.example.nozokima"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.example.nozokima"
@@ -47,9 +49,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlin {
-        jvmToolchain(17)
-    }
     buildFeatures {
         compose = true
     }
@@ -62,37 +61,39 @@ android {
     // assetsに巨大ファイルを置かないため、noCompressの設定は不要になりました
 }
 
+kotlin {
+    jvmToolchain(17)
+}
+
 dependencies {
-    implementation("androidx.core:core-ktx:1.12.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.activity:activity-compose:1.8.2")
-    implementation(platform("androidx.compose:compose-bom:2024.02.00"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.activity.compose)
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.ui)
+    implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.ui.tooling.preview)
+    implementation(libs.androidx.material3)
+    implementation(libs.androidx.material.icons.extended)
 
-    val roomVersion = "2.8.4"
-    implementation("androidx.room:room-runtime:$roomVersion")
-    implementation("androidx.room:room-ktx:$roomVersion")
-    ksp("androidx.room:room-compiler:$roomVersion")
-
-    implementation("net.objecthunter:exp4j:0.4.8")
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
 
     // ML Kit Text Recognition
-    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+    implementation(libs.mlkit.text.japanese)
+    implementation(libs.kotlinx.coroutines.play.services)
 
     // ML Kit GenAI Prompt API (Gemini Nano)
-    implementation("com.google.mlkit:genai-prompt:1.0.0-beta2")
+    implementation(libs.mlkit.genai.prompt)
 
     // Biometric
-    implementation("androidx.biometric:biometric:1.1.0")
-    implementation("androidx.fragment:fragment-ktx:1.8.9")
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.fragment.ktx)
 
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
 
-    implementation("net.lingala.zip4j:zip4j:2.11.5")
-    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation(libs.zip4j)
+    implementation(libs.coil.compose)
 }

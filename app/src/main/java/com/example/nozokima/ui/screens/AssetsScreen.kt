@@ -1,3 +1,6 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@file:Suppress("UNUSED_VALUE", "UNUSED_CHANGED_VALUE")
+
 package com.example.nozokima.ui.screens
 
 import androidx.activity.compose.BackHandler
@@ -30,7 +33,6 @@ import ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun AssetsScreen(
     dao: FinanceDao,
@@ -47,15 +49,17 @@ fun AssetsScreen(
     LaunchedEffect(scheduledExpenses) {
         val now = System.currentTimeMillis()
         scheduledExpenses.filter { !it.isCompleted && it.date <= now }.forEach { expense ->
-            dao.insertTransaction(TransactionEntity(
-                id = UUID.randomUUID().toString(),
-                name = expense.name,
-                amount = expense.amount,
-                category = expense.category,
-                date = expense.date,
-                assetName = expense.assetName,
-                isExpense = true
-            ))
+            dao.insertTransaction(
+                TransactionEntity(
+                    id = UUID.randomUUID().toString(),
+                    name = expense.name,
+                    amount = expense.amount,
+                    category = expense.category,
+                    date = expense.date,
+                    assetName = expense.assetName,
+                    isExpense = true,
+                )
+            )
             val asset = dao.getAssetByName(expense.assetName)
             if (asset != null) {
                 dao.updateAsset(asset.copy(amount = asset.amount - expense.amount, lastUpdated = System.currentTimeMillis()))
@@ -96,7 +100,7 @@ fun AssetsScreen(
     var selectedStartDate by remember { mutableLongStateOf(0L) }
     var selectedEndDate by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var selectedPeriodLabel by remember { mutableStateOf("全て") }
-    var showAssetFilterMenu by remember { mutableStateOf(false) }
+    var showAssetFilterMenu by remember { mutableStateOf(value = false) }
     var showCategoryFilterMenu by remember { mutableStateOf(false) }
     var showPeriodFilterMenu by remember { mutableStateOf(false) }
     var showExpenseFilterMenu by remember { mutableStateOf(false) }
@@ -665,8 +669,6 @@ fun AssetsScreen(
                                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                                     AssetCategoryTile(group) {
                                         selectedGroupTitle = group
-                                        editNameText = ""
-                                        editAmountText = ""
                                         showGroupSheet = false
                                         showAddItemDialog = true
                                     }
@@ -684,7 +686,9 @@ fun AssetsScreen(
 
     if (showAddItemDialog) {
         ModalBottomSheet(
-            onDismissRequest = { showAddItemDialog = false },
+            onDismissRequest = {
+                showAddItemDialog = false
+            },
             containerColor = Color.White,
             dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -723,8 +727,7 @@ fun AssetsScreen(
                 ) {
                     Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
-                            @Suppress("DEPRECATION")
-                            Icon(Icons.Default.Label, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
+                            Icon(Icons.AutoMirrored.Filled.Label, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
@@ -849,7 +852,9 @@ fun AssetsScreen(
         if (!showAssetAmountEdit && !showAssetNameEdit && !showAssetDeleteConfirm) {
             val spec = assetTypeUiSpec(asset.category)
             ModalBottomSheet(
-                onDismissRequest = { editingAssetEntity = null },
+                onDismissRequest = {
+                    editingAssetEntity = null
+                },
                 containerColor = Color.White,
                 dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -950,7 +955,10 @@ fun AssetsScreen(
         if (asset != null) {
             val spec = assetTypeUiSpec(asset.category)
             ModalBottomSheet(
-                onDismissRequest = { showAssetNameEdit = false; editingAssetEntity = null },
+                onDismissRequest = {
+                    showAssetNameEdit = false
+                    editingAssetEntity = null
+                },
                 containerColor = Color.White,
                 dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -979,7 +987,7 @@ fun AssetsScreen(
                     ) {
                         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
-                                Icon(Icons.Default.Label, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
+                                Icon(Icons.AutoMirrored.Filled.Label, null, tint = NotionSafeGreen, modifier = Modifier.padding(10.dp))
                             }
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
@@ -1038,7 +1046,10 @@ fun AssetsScreen(
         if (asset != null) {
             val spec = assetTypeUiSpec(asset.category)
             ModalBottomSheet(
-                onDismissRequest = { showAssetAmountEdit = false; editingAssetEntity = null },
+                onDismissRequest = {
+                    showAssetAmountEdit = false
+                    editingAssetEntity = null
+                },
                 containerColor = Color.White,
                 dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)

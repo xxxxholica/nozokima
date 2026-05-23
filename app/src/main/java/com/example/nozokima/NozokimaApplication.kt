@@ -17,11 +17,11 @@ class NozokimaApplication : Application() {
         Room.databaseBuilder(
             this,
             AppDatabase::class.java,
-            "nozokima-db"
-        ).fallbackToDestructiveMigration().build()
+            "nozokima-db",
+        ).fallbackToDestructiveMigration(dropAllTables = true).build()
     }
 
-    val geminiModel by lazy { GeminiNanoModel(this) }
+    val geminiModel by lazy { GeminiNanoModel() }
 
     override fun onCreate() {
         super.onCreate()

@@ -9,7 +9,6 @@ import net.lingala.zip4j.model.enums.AesKeyStrength
 import net.lingala.zip4j.model.enums.EncryptionMethod
 import java.io.File
 import java.io.InputStream
-import java.nio.charset.Charset
 
 class BackupManager(private val dao: FinanceDao, private val context: Context) {
 
@@ -30,10 +29,10 @@ class BackupManager(private val dao: FinanceDao, private val context: Context) {
         if (lines.isEmpty()) return emptyList()
         
         val header = splitCsvRow(lines[0])
-        return lines.drop(1).map { line ->
+        return lines.asSequence().drop(1).map { line ->
             val values = splitCsvRow(line)
             header.zip(values).toMap()
-        }
+        }.toList()
     }
 
     private fun splitCsvRow(row: String): List<String> {
@@ -44,7 +43,7 @@ class BackupManager(private val dao: FinanceDao, private val context: Context) {
         while (i < row.length) {
             val c = row[i]
             if (c == '\"') {
-                if (inQuotes && i + 1 < row.length && row[i + 1] == '\"') {
+                if (inQuotes && (i + 1 < row.length) && (row[i + 1] == '\"')) {
                     current.append('\"')
                     i++
                 } else {
@@ -180,9 +179,9 @@ class BackupManager(private val dao: FinanceDao, private val context: Context) {
             if (zip.isEncrypted) {
                 try {
                     zip.extractAll(tempDir.absolutePath)
-                } catch (e: Exception) {
-                    throw Exception("パスワードが正しくありません。")
-                }
+            } catch (_: Exception) {
+                throw Exception("パスワードが正しくありません。")
+            }
             } else {
                 zip.extractAll(tempDir.absolutePath)
             }
@@ -201,28 +200,31 @@ class BackupManager(private val dao: FinanceDao, private val context: Context) {
             // Transactions
             File(tempDir, "transactions.csv").takeIf { it.exists() }?.let { file ->
                 parseCsv(file.readText()).forEach { row ->
-                    dao.insertTransaction(TransactionEntity(
-                        id = row["id"] ?: "",
-                        name = row["name"] ?: "",
-                        amount = row["amount"]?.toIntOrNull() ?: 0,
-                        category = row["category"] ?: "",
-                        date = row["date"]?.toLongOrNull() ?: 0L,
-                        assetName = row["assetName"] ?: "",
-                        isExpense = row["isExpense"]?.toBoolean() ?: true
-                    ))
+                    dao.insertTransaction(
+                        TransactionEntity(
+                            id = row["id"] ?: "",
+                            name = row["name"] ?: "",
+                            amount = row["amount"]?.toIntOrNull() ?: 0,
+                            category = row["category"] ?: "",
+                            date = row["date"]?.toLongOrNull() ?: 0L,
+                            assetName = row["assetName"] ?: "",
+                            isExpense = row["isExpense"]?.toBoolean() ?: true,
+                        ),
+                    )
                 }
             }
 
-            // Assets
             File(tempDir, "assets.csv").takeIf { it.exists() }?.let { file ->
                 parseCsv(file.readText()).forEach { row ->
-                    dao.insertAsset(AssetEntity(
-                        id = row["id"] ?: "",
-                        name = row["name"] ?: "",
-                        amount = row["amount"]?.toIntOrNull() ?: 0,
-                        category = row["category"] ?: "",
-                        lastUpdated = row["lastUpdated"]?.toLongOrNull() ?: 0L
-                    ))
+                    dao.insertAsset(
+                        AssetEntity(
+                            id = row["id"] ?: "",
+                            name = row["name"] ?: "",
+                            amount = row["amount"]?.toIntOrNull() ?: 0,
+                            category = row["category"] ?: "",
+                            lastUpdated = row["lastUpdated"]?.toLongOrNull() ?: 0L,
+                        )
+                    )
                 }
             }
 

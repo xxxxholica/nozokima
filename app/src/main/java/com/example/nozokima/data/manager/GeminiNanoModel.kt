@@ -1,6 +1,5 @@
 package com.example.nozokima.data.manager
 
-import android.content.Context
 import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.prompt.*
@@ -14,7 +13,7 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
 
-class GeminiNanoModel(@Suppress("UNUSED_PARAMETER") context: Context) {
+class GeminiNanoModel {
     private val generativeModel = Generation.getClient()
 
     private val _status = MutableStateFlow(FeatureStatus.UNAVAILABLE)
@@ -57,6 +56,7 @@ class GeminiNanoModel(@Suppress("UNUSED_PARAMETER") context: Context) {
         }
     }
 
+    @Suppress("unused")
     suspend fun startDownload() {
         if (_isDownloading.value) return
         _isDownloading.value = true

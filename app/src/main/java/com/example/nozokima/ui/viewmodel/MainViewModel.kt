@@ -6,7 +6,6 @@ import com.example.nozokima.data.local.FinanceDao
 import com.example.nozokima.data.local.entities.AppSettingsEntity
 import com.example.nozokima.data.local.entities.ChatSessionEntity
 import com.example.nozokima.data.manager.GeminiNanoModel
-import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -17,12 +16,12 @@ data class MainUiState(
     val aiStatus: Int = 0,
     val aiIsReady: Boolean = false,
     val aiIsGenerating: Boolean = false,
-    val isLoaded: Boolean = false
+    val isLoaded: Boolean = false,
 )
 
 class MainViewModel(
-    private val dao: FinanceDao,
-    private val gemini: GeminiNanoModel
+    dao: FinanceDao,
+    private val gemini: GeminiNanoModel,
 ) : ViewModel() {
 
     val uiState: StateFlow<MainUiState> = combine(
@@ -32,7 +31,9 @@ class MainViewModel(
         gemini.isReady,
         gemini.isGenerating
     ) { params ->
+        @Suppress("UNCHECKED_CAST")
         val settings = params[0] as AppSettingsEntity?
+        @Suppress("UNCHECKED_CAST")
         val sessions = params[1] as List<ChatSessionEntity>
         val status = params[2] as Int
         val ready = params[3] as Boolean
@@ -52,12 +53,6 @@ class MainViewModel(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = MainUiState()
     )
-
-    fun startAiDownload() {
-        viewModelScope.launch {
-            gemini.startDownload()
-        }
-    }
 
     fun checkAiStatus() {
         viewModelScope.launch {

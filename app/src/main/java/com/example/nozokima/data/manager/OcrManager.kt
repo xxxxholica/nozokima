@@ -23,7 +23,7 @@ class OcrManager(private val context: Context) {
         // シンプルな正規表現で金額らしい数値を抽出
         // 1,234 や 1234、￥1,234、1234円などを対象にする
         // 日本語エンジンなので全角も考慮されるが、ML Kit側で半角に正規化されることが多い
-        val amountRegex = Regex("(?:¥|￥|\\$)?\\s?(\\d{1,3}(?:,\\d{3})+|\\d{2,})")
+        val amountRegex = Regex("[¥￥$]?\\s?(\\d{1,3}(?:,\\d{3})+|\\d{2,})")
         
         val candidates = mutableSetOf<Int>()
         
@@ -34,14 +34,14 @@ class OcrManager(private val context: Context) {
                     val valueStr = match.groupValues[1].replace(",", "")
                     val value = valueStr.toIntOrNull()
                     // 10円以上かつ100万円以下の現実的な範囲を候補とする
-                    if (value != null && value in 10..1000000) {
+                    if ((value != null) && (value in 10..1000000)) {
                         candidates.add(value)
                     }
                 }
             }
         }
         
-        return candidates.toList().sortedDescending()
+        return candidates.asSequence().sortedDescending().toList()
     }
 
     suspend fun extractFullText(uri: Uri): String? {

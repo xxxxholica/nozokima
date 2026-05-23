@@ -79,7 +79,7 @@ data class OcrPrediction(
     val date: Long,
     val assetName: String,
     val categoryName: String,
-    val memo: String
+    val memo: String,
 )
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -99,26 +99,26 @@ fun InputScreen(
         mutableStateOf(
             when {
                 initialRecovery != null -> "回収"
-                initialMode != null && initialMode in modes -> initialMode
+                (initialMode != null) && (initialMode in modes) -> initialMode
                 else -> "支出"
-            }
+            },
         ) 
     }
     var selectedPaymentType by remember { mutableStateOf("即時") }
     
     var amountText by remember { mutableStateOf(if (initialRecovery != null) (initialRecovery.amount - initialRecovery.recoveredAmount).toString() else "") }
     var memoText by remember { mutableStateOf(initialRecovery?.memo ?: "") }
-    var personName by remember { mutableStateOf(if (initialRecovery != null) initialRecovery.personName else "") }
+    var personName by remember { mutableStateOf(initialRecovery?.personName ?: "") }
     var selectedLending by remember { mutableStateOf(initialRecovery) }
     
     var selectedAssetEntity by remember { mutableStateOf<AssetEntity?>(null) }
     var selectedToAssetEntity by remember { mutableStateOf<AssetEntity?>(null) }
     var showAssetSheet by remember { mutableStateOf(value = false) }
-    var showToAssetSheet by remember { mutableStateOf(false) }
-    var showCategorySheet by remember { mutableStateOf(false) }
-    var showTypeSheet by remember { mutableStateOf(false) }
-    var showPaymentMethodSheet by remember { mutableStateOf(false) }
-    var showLendingSheet by remember { mutableStateOf(false) }
+    var showToAssetSheet by remember { mutableStateOf(value = false) }
+    var showCategorySheet by remember { mutableStateOf(value = false) }
+    var showTypeSheet by remember { mutableStateOf(value = false) }
+    var showPaymentMethodSheet by remember { mutableStateOf(value = false) }
+    var showLendingSheet by remember { mutableStateOf(value = false) }
     var selectedDate by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var showDatePicker by remember { mutableStateOf(false) }
     val dateFormatter = remember { SimpleDateFormat("MM月dd日(E)", Locale.JAPAN) }
@@ -194,9 +194,9 @@ fun InputScreen(
     )
 
     val expenseCategories = remember(customCategories) {
-        customCategories.filter { it.type == "EXPENSE" }.map { 
+        customCategories.asSequence().filter { it.type == "EXPENSE" }.map { 
             CategoryData(it.name, iconMap[it.iconName] ?: Icons.Default.MoreHoriz)
-        }.ifEmpty {
+        }.toList().ifEmpty {
             listOf(
                 CategoryData("食生活", Icons.Default.Restaurant),
                 CategoryData("住まい", Icons.Default.Home),
@@ -215,9 +215,9 @@ fun InputScreen(
     }
 
     val incomeCategories = remember(customCategories) {
-        customCategories.filter { it.type == "INCOME" }.map {
+        customCategories.asSequence().filter { it.type == "INCOME" }.map {
             CategoryData(it.name, iconMap[it.iconName] ?: Icons.Default.MoreHoriz)
-        }.ifEmpty {
+        }.toList().ifEmpty {
             listOf(
                 CategoryData("給与", Icons.Default.AccountBalance),
                 CategoryData("事業・副業", Icons.Default.Build),
@@ -247,8 +247,10 @@ fun InputScreen(
                 }
 
                 if ((gemini == null) || !gemini.isReady.value) {
-                    val amount = ocrManager?.extractAmount(uri)
-                    if (amount != null) amountText = amount.toString()
+                    val amount = ocrManager.extractAmount(uri)
+                    if (amount != null) {
+                    amountText = amount.toString()
+                }
                     snackbarHostState.showSnackbar("AIが準備中のため金額のみ抽出しました")
                     return@launch
                 }
@@ -331,13 +333,15 @@ fun InputScreen(
                         // AIが「不明」といった文言を返した場合や、内容が空すぎる場合は候補から外す
                         if (!finalMemo.contains("不明") && !finalMemo.contains("解析") &&
                             !pAsset.contains("不明") && !pGenre.contains("不明")) {
-                            predictions.add(OcrPrediction(
-                                amount = formatAmountWithCommas(pAmount),
-                                date = pDate,
-                                assetName = pAsset,
-                                categoryName = pGenre,
-                                memo = finalMemo
-                            ))
+                            predictions.add(
+                                OcrPrediction(
+                                    amount = formatAmountWithCommas(pAmount),
+                                    date = pDate,
+                                    assetName = pAsset,
+                                    categoryName = pGenre,
+                                    memo = finalMemo
+                                )
+                            )
                         }
                     }
                 }
@@ -608,7 +612,7 @@ fun InputScreen(
                             """.trimIndent()
                             val advice = gemini.generateResponse(prompt)
                             successInfo = successInfo?.copy(aiAdvice = advice)
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             successInfo = successInfo?.copy(aiAdvice = "おや、記録だけは一人前ですね。それで、いつになったら貯金という文字を覚えるのでしょうか？")
                         }
                     }
@@ -1553,7 +1557,7 @@ fun InputScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(
-                                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    brush = Brush.verticalGradient(
                                         colors = listOf(Color.Transparent, NotionBackground.copy(alpha = 0.9f), NotionBackground),
                                         startY = 0f
                                     )
