@@ -57,13 +57,65 @@ fun GeneralSettingsScreen(
     onExportClick: () -> Unit,
     onImportClick: () -> Unit,
     onCategoryManagementClick: () -> Unit,
+    themeMode: String,
+    onThemeModeChange: (String) -> Unit,
     onBack: () -> Unit
 ) {
+    var showThemeDialog by remember { mutableStateOf(false) }
     BackHandler { onBack() }
+
+    if (showThemeDialog) {
+        AlertDialog(
+            onDismissRequest = { showThemeDialog = false },
+            title = { Text("テーマの変更", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                    val options = listOf(
+                        Triple("SYSTEM", "システム設定に従う", Icons.Default.Settings),
+                        Triple("LIGHT", "ライトモード", Icons.Default.LightMode),
+                        Triple("DARK", "ダークモード", Icons.Default.DarkMode)
+                    )
+                    options.forEach { (mode, label, icon) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    onThemeModeChange(mode)
+                                    showThemeDialog = false
+                                }
+                                .padding(vertical = 4.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(icon, null, modifier = Modifier.size(20.dp), tint = NotionSafeGreen)
+                            Spacer(Modifier.width(12.dp))
+                            Text(label, modifier = Modifier.weight(1f), fontSize = 15.sp)
+                            RadioButton(
+                                selected = themeMode == mode,
+                                onClick = {
+                                    onThemeModeChange(mode)
+                                    showThemeDialog = false
+                                },
+                                colors = RadioButtonDefaults.colors(selectedColor = NotionSafeGreen)
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showThemeDialog = false }) {
+                    Text("キャンセル", color = NotionTextSecondary, fontWeight = FontWeight.Medium)
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(24.dp)
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(NotionBackground)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         ScreenHeader(
             title = "設定",
@@ -100,6 +152,17 @@ fun GeneralSettingsScreen(
                         description = "収支ジャンルの追加・編集・並べ替え",
                         onClick = onCategoryManagementClick
                     )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon = Icons.Default.Contrast,
+                        title = "テーマ",
+                        description = when(themeMode) {
+                            "LIGHT" -> "ライトモード"
+                            "DARK" -> "ダークモード"
+                            else -> "システム設定に従う"
+                        },
+                        onClick = { showThemeDialog = true }
+                    )
                 }
 
                 // セキュリティセクション
@@ -116,13 +179,13 @@ fun GeneralSettingsScreen(
                                     checkedThumbColor = Color.White,
                                     checkedTrackColor = NotionSafeGreen,
                                     uncheckedThumbColor = Color.White,
-                                    uncheckedTrackColor = NotionBorder
+                                    uncheckedTrackColor = MaterialTheme.colorScheme.outline
                                 )
                             )
                         }
                     )
                     if (appLockEnabled) {
-                        HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
                         SettingsItem(
                             icon = Icons.Default.Password,
                             title = "パスワードの変更",
@@ -130,7 +193,7 @@ fun GeneralSettingsScreen(
                             onClick = onChangePassword
                         )
                         if (isBiometricAvailable) {
-                            HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
                             SettingsItem(
                                 icon = Icons.Default.Fingerprint,
                                 title = "生体認証を使用",
@@ -143,7 +206,7 @@ fun GeneralSettingsScreen(
                                             checkedThumbColor = Color.White,
                                             checkedTrackColor = NotionSafeGreen,
                                             uncheckedThumbColor = Color.White,
-                                            uncheckedTrackColor = NotionBorder
+                                            uncheckedTrackColor = MaterialTheme.colorScheme.outline
                                         )
                                     )
                                 }
@@ -160,7 +223,7 @@ fun GeneralSettingsScreen(
                         description = "現在のデータを暗号化してファイルに保存",
                         onClick = onExportClick
                     )
-                    HorizontalDivider(color = NotionBorder, modifier = Modifier.padding(horizontal = 16.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
                     SettingsItem(
                         icon = Icons.Default.Download,
                         title = "データのインポート",
@@ -191,8 +254,8 @@ fun SettingsSection(
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
-            color = Color.White,
-            border = BorderStroke(1.dp, NotionBorder),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
             content = { Column(content = content) }
         )
     }
@@ -220,6 +283,7 @@ fun SettingsItem(
             }
         },
         trailingContent = trailing,
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = if (onClick != null) Modifier.clickable { onClick() } else Modifier
     )
 }
@@ -330,9 +394,9 @@ fun CategoryListScreen(
 
         TabRow(
             selectedTabIndex = selectedTab,
-            containerColor = Color.White,
+            containerColor = MaterialTheme.colorScheme.surface,
             contentColor = NotionSafeGreen,
-            divider = { HorizontalDivider(color = NotionBorder) }
+            divider = { HorizontalDivider(color = MaterialTheme.colorScheme.outline) }
         ) {
             listOf("支出", "収入").forEachIndexed { index, title ->
                 Tab(
@@ -364,8 +428,8 @@ fun CategoryListScreen(
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, NotionBorder)
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                 ) {
                     Row(
                         modifier = Modifier
@@ -385,8 +449,8 @@ fun CategoryListScreen(
                         Spacer(Modifier.width(16.dp))
                         
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(cat.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NotionTextPrimary)
-                            Text(if (cat.type == "EXPENSE") "支出" else "収入", fontSize = 12.sp, color = NotionTextSecondary)
+                            Text(cat.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            Text(if (cat.type == "EXPENSE") "支出" else "収入", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         
                         Row {
@@ -427,7 +491,7 @@ fun CategoryEditScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(NotionBackground)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         ScreenHeader(
             title = if (category == null) "ジャンル追加" else "ジャンル編集",
@@ -467,7 +531,7 @@ fun CategoryEditScreen(
                         selectedLabelColor = NotionSafeGreen
                     ),
                     border = FilterChipDefaults.filterChipBorder(
-                        borderColor = NotionBorder,
+                        borderColor = MaterialTheme.colorScheme.outline,
                         selectedBorderColor = NotionSafeGreen,
                         borderWidth = 1.dp,
                         selectedBorderWidth = 1.dp,
@@ -484,7 +548,7 @@ fun CategoryEditScreen(
                         selectedLabelColor = NotionSafeGreen
                     ),
                     border = FilterChipDefaults.filterChipBorder(
-                        borderColor = NotionBorder,
+                        borderColor = MaterialTheme.colorScheme.outline,
                         selectedBorderColor = NotionSafeGreen,
                         borderWidth = 1.dp,
                         selectedBorderWidth = 1.dp,
@@ -499,25 +563,25 @@ fun CategoryEditScreen(
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                color = Color.White,
-                border = BorderStroke(1.dp, NotionBorder)
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("ジャンルの名称", fontSize = 12.sp, color = NotionTextSecondary)
+                    Text("ジャンルの名称", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     androidx.compose.foundation.text.BasicTextField(
                         value = nameText,
                         onValueChange = { nameText = it },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         textStyle = androidx.compose.ui.text.TextStyle(
-                            color = NotionTextPrimary,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold
                         ),
                         decorationBox = { inner ->
                             if (nameText.isEmpty()) Text(
                                 "趣味",
-                                color = NotionTextSecondary.copy(alpha = 0.5f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                 fontSize = 16.sp
                             )
                             inner()
@@ -532,7 +596,7 @@ fun CategoryEditScreen(
                 "アイコンを選択",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = NotionTextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
             )
 
@@ -554,12 +618,12 @@ fun CategoryEditScreen(
                                         .size(56.dp)
                                         .background(
                                             if (isSelected) NotionSafeGreen.copy(alpha = 0.1f)
-                                            else Color.White,
+                                            else MaterialTheme.colorScheme.surface,
                                             RoundedCornerShape(14.dp)
                                         )
                                         .border(
                                             width = if (isSelected) 2.dp else 1.dp,
-                                            color = if (isSelected) NotionSafeGreen else NotionBorder,
+                                            color = if (isSelected) NotionSafeGreen else MaterialTheme.colorScheme.outline,
                                             shape = RoundedCornerShape(14.dp)
                                         )
                                         .clickable { selectedIcon = iconName },
@@ -568,7 +632,7 @@ fun CategoryEditScreen(
                                     Icon(
                                         icon,
                                         null,
-                                        tint = if (isSelected) NotionSafeGreen else NotionTextSecondary,
+                                        tint = if (isSelected) NotionSafeGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(24.dp)
                                     )
                                 }

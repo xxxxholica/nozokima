@@ -11,6 +11,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -57,7 +60,7 @@ fun ScreenHeader(
         }
         Text(
             text = title,
-            color = NotionTextPrimary,
+            color = MaterialTheme.colorScheme.onBackground,
             style = titleStyle,
             modifier = Modifier.weight(1f),
             maxLines = titleMaxLines,
@@ -75,7 +78,8 @@ fun UnifiedAssetCardRow(
     icon: ImageVector,
     accentColor: Color,
     onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null
+    onLongClick: (() -> Unit)? = null,
+    pointAmount: Int = 0
 ) {
     val haptic = LocalHapticFeedback.current
     val interactionModifier = if (onLongClick != null) {
@@ -94,8 +98,8 @@ fun UnifiedAssetCardRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(74.dp)
-            .background(Color.White, RoundedCornerShape(14.dp))
-            .border(1.dp, NotionBorder, RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp))
             .clip(RoundedCornerShape(14.dp))
             .then(interactionModifier)
             .padding(horizontal = 14.dp),
@@ -111,19 +115,30 @@ fun UnifiedAssetCardRow(
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, color = NotionTextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = "¥ ${String.format(Locale.JAPAN, "%,d", amount)}",
-            color = if (amount < 0) Color(0xFFE57373) else NotionTextPrimary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold
-        )
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = "¥ ${String.format(Locale.JAPAN, "%,d", amount)}",
+                color = if (amount < 0) Color(0xFFE57373) else MaterialTheme.colorScheme.onSurface,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+            if (pointAmount > 0) {
+                Text(
+                    text = "(内 保有ポイント ${String.format(Locale.JAPAN, "%,d", pointAmount)})",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AssetHistoryItem(
     name: String,
@@ -133,9 +148,16 @@ fun AssetHistoryItem(
     color: Color,
     icon: ImageVector = Icons.Default.MoreHoriz,
     onClick: () -> Unit = {},
-    onLongClick: () -> Unit = {}
+    onLongClick: () -> Unit = {},
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null,
+    isReorderable: Boolean = false
 ) {
     val haptic = LocalHapticFeedback.current
+    
+    // 長押しジェスチャーを検知するための処理
+    // ≡ アイコンへの長押しで入れ替えアクションを実行する
+    
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -148,22 +170,61 @@ fun AssetHistoryItem(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+            if (isReorderable) {
+                Box(
+                    modifier = Modifier
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                // 長押しされた時に「次」のものと入れ替える（簡易ドラッグ操作の代わり）
+                                onMoveDown?.invoke() ?: onMoveUp?.invoke()
+                            }
+                        )
+                        .padding(end = 12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Menu,
+                        contentDescription = "長押しで移動",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            
             Box(
                 modifier = Modifier
                     .size(38.dp)
                     .background(color.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
-                    .border(1.dp, NotionBorder, RoundedCornerShape(10.dp)),
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(imageVector = icon, contentDescription = memo, tint = color, modifier = Modifier.size(18.dp))
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(name, color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("$memo・$balanceAfter", color = NotionTextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(name, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("$memo・$balanceAfter", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+        
         Text(amount, color = color, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+
+        if (!isReorderable && (onMoveUp != null || onMoveDown != null)) {
+            Spacer(Modifier.width(8.dp))
+            Column {
+                if (onMoveUp != null) {
+                    IconButton(onClick = onMoveUp, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.KeyboardArrowUp, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    }
+                }
+                if (onMoveDown != null) {
+                    IconButton(onClick = onMoveDown, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -171,7 +232,7 @@ fun AssetHistoryItem(
 fun AssetCategoryTile(label: String, icon: ImageVector? = null, color: Color? = null, subLabel: String? = null, onClick: () -> Unit) {
     val spec = if (icon == null) assetTypeUiSpec(label) else null
     val targetIcon = icon ?: spec?.icon ?: Icons.Default.MoreHoriz
-    val targetColor = color ?: spec?.accentColor ?: NotionTextPrimary
+    val targetColor = color ?: spec?.accentColor ?: MaterialTheme.colorScheme.onSurface
 
     Column(
         modifier = Modifier
@@ -192,7 +253,7 @@ fun AssetCategoryTile(label: String, icon: ImageVector? = null, color: Color? = 
         Spacer(Modifier.height(8.dp))
         Text(
             text = label,
-            color = NotionTextPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 11.sp,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center,
@@ -202,7 +263,7 @@ fun AssetCategoryTile(label: String, icon: ImageVector? = null, color: Color? = 
         if (subLabel != null) {
             Text(
                 text = subLabel,
-                color = NotionTextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 9.sp,
                 textAlign = TextAlign.Center,
                 maxLines = 1
@@ -216,9 +277,9 @@ fun DeleteConfirmDialog(text: String, onDismiss: () -> Unit, onConfirm: () -> Un
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("削除の確認", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
-        text = { Text(text, color = NotionTextSecondary) },
+        text = { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant) },
         confirmButton = { TextButton(onClick = onConfirm) { Text("削除", color = Color(0xFFE57373)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } },
-        containerColor = Color.White, shape = RoundedCornerShape(12.dp)
+        containerColor = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(12.dp)
     )
 }

@@ -11,5 +11,7 @@ data class AppSettingsEntity(
     val isBiometricEnabled: Boolean = false,
     val failedAttempts: Int = 0,
     val lockoutUntil: Long = 0,
-    val isAssetsVisible: Boolean = true
+    val isAssetsVisible: Boolean = true,
+    val isSetupCompleted: Boolean = false,
+    val themeMode: String = "SYSTEM"
 )

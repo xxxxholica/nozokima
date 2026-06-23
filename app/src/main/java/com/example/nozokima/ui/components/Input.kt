@@ -37,8 +37,8 @@ fun InputTile(
             .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .alpha(if (enabled) 1f else 0.5f),
         shape = RoundedCornerShape(16.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, NotionBorder)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -58,18 +58,18 @@ fun InputTile(
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(label, fontSize = 12.sp, color = NotionTextSecondary)
+                Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     value,
                     fontSize = 15.sp,
-                    color = if (isPlaceholder) NotionTextSecondary.copy(alpha = 0.5f) else NotionTextPrimary,
+                    color = if (isPlaceholder) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface,
                     fontWeight = if (isPlaceholder) FontWeight.Normal else FontWeight.SemiBold
                 )
             }
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = NotionTextSecondary.copy(alpha = 0.3f)
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
             )
         }
     }
@@ -130,11 +130,11 @@ fun CustomKeypad(
                         modifier = Modifier.weight(1f).height(60.dp),
                         contentPadding = PaddingValues(0.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isAction) actionColor else if (isNumber) Color(0xFFF7F7F7) else Color.White,
-                            contentColor = if (isAction) Color.White else NotionTextPrimary
+                            containerColor = if (isAction) actionColor else if (isNumber) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f) else MaterialTheme.colorScheme.surface,
+                            contentColor = if (isAction) Color.White else MaterialTheme.colorScheme.onSurface
                         ),
                         shape = RoundedCornerShape(12.dp),
-                        border = if (isAction) null else BorderStroke(1.dp, NotionBorder),
+                        border = if (isAction) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                         elevation = null
                     ) {
                         if (isDelete) {
@@ -142,7 +142,7 @@ fun CustomKeypad(
                                 Icons.AutoMirrored.Filled.Backspace,
                                 contentDescription = "削除",
                                 modifier = Modifier.size(20.dp),
-                                tint = NotionTextPrimary
+                                tint = MaterialTheme.colorScheme.onSurface
                             )
                         } else {
                             Text(

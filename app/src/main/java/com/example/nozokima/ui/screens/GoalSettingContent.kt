@@ -1,6 +1,7 @@
 package com.example.nozokima.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -74,6 +75,7 @@ fun GoalSettingContent(
     var monthlyIncomeText by rememberSaveable { mutableStateOf("") }
     var showDatePicker by remember { mutableStateOf(false) }
     var showResults by rememberSaveable { mutableStateOf(false) }
+    var useVirtualBalance by rememberSaveable { mutableStateOf(false) }
     var isSimulationView by rememberSaveable { mutableStateOf(false) }
     var goalKeypadTarget by remember { mutableStateOf("amount") } // "amount" or "income"
 
@@ -96,7 +98,7 @@ fun GoalSettingContent(
             if (g.monthlyIncome > 0) monthlyIncomeText = g.monthlyIncome.toString()
             if (g.targetDateMillis > 0) targetDateMillis = g.targetDateMillis
             if (g.startDateMillis > 0) startDateMillis = g.startDateMillis
-            showResults = g.showResults
+            useVirtualBalance = g.useVirtualBalance
             loadedFromDb = true
         }
     }
@@ -111,25 +113,33 @@ fun GoalSettingContent(
                     monthlyIncome = monthlyIncomeText.toLongOrNull() ?: 0L,
                     targetDateMillis = targetDateMillis,
                     showResults = showResults,
-                    startDateMillis = startDateMillis
+                    startDateMillis = startDateMillis,
+                    useVirtualBalance = useVirtualBalance
                 )
             )
         }
     }
 
     // 計算
+    val upcomingTotal = (lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount } + 
+                        (dao.getAllScheduledExpenses().collectAsState(initial = emptyList()).value.asSequence().filter { !it.isCompleted }.sumOf { it.amount })).toLong()
+    // DAOからすべてのデータを取得するのは重いので、本来はViewModelで行うべきだが、既存コードに合わせる
+    val virtualBalanceForGoal = actualTotalAssets - upcomingTotal // 簡易的に貸付を引く
+
+    val currentAssetsForCalc = if (useVirtualBalance) virtualBalanceForGoal else actualTotalAssets
+
     val remainingDays = ((targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(0)
     val remainingMonths = (remainingDays / 30.0).coerceAtLeast(0.1)
     val targetAmount = targetAmountText.toLongOrNull() ?: 0L
     val monthlyIncome = monthlyIncomeText.toLongOrNull() ?: 0L
     val totalExpectedIncome = (monthlyIncome * remainingMonths).toLong()
-    val totalSpendable = (actualTotalAssets + totalExpectedIncome - targetAmount).coerceAtLeast(0L)
+    val totalSpendable = (currentAssetsForCalc + totalExpectedIncome - targetAmount).coerceAtLeast(0L)
     val monthlyBudget = if (remainingMonths > 0) (totalSpendable / remainingMonths).toLong() else 0L
 
     val dateFormatter = remember { SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN) }
 
-    val goalAchieved = actualTotalAssets >= targetAmount && targetAmount > 0L && showResults
-    val isAmountTooLow = targetAmount > 0L && targetAmount <= actualTotalAssets
+    val goalAchieved = currentAssetsForCalc >= targetAmount && targetAmount > 0L && showResults
+    val isAmountTooLow = targetAmount > 0L && targetAmount <= currentAssetsForCalc
     val currentStep = when {
         goalAchieved -> 3
         showResults -> 2
@@ -148,7 +158,7 @@ fun GoalSettingContent(
     BackHandler(enabled = isKeypadVisible) { onKeypadVisibilityChange(false) }
     BackHandler(enabled = !isKeypadVisible) { onBack() }
 
-    Box(modifier = Modifier.fillMaxSize().background(NotionBackground)) {
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(modifier = Modifier.fillMaxSize()) {
             val pageTitle = when (currentStep) {
                 3 -> "目標達成"
@@ -200,7 +210,7 @@ fun GoalSettingContent(
                             when (targetStep) {
                                 3 -> {
                                     GoalAchievedView(
-                                        actualTotalAssets = actualTotalAssets,
+                                        actualTotalAssets = currentAssetsForCalc,
                                         targetAmount = targetAmount,
                                         totalSpendable = totalSpendable,
                                         monthlyBudget = monthlyBudget,
@@ -219,7 +229,7 @@ fun GoalSettingContent(
                                 }
                                 2 -> {
                                     GoalProgressView(
-                                        actualTotalAssets = actualTotalAssets,
+                                        actualTotalAssets = currentAssetsForCalc,
                                         targetAmount = targetAmount,
                                         totalSpendable = totalSpendable,
                                         monthlyBudget = monthlyBudget,
@@ -238,7 +248,7 @@ fun GoalSettingContent(
                                 }
                                 1 -> {
                                     GoalSimulationView(
-                                        actualTotalAssets = actualTotalAssets,
+                                        actualTotalAssets = currentAssetsForCalc,
                                         totalSpendable = totalSpendable,
                                         monthlyBudget = monthlyBudget
                                     )
@@ -265,7 +275,9 @@ fun GoalSettingContent(
                                             showDatePicker = true
                                         },
                                         dateFormatter = dateFormatter,
-                                        isAmountTooLow = isAmountTooLow
+                                        isAmountTooLow = isAmountTooLow,
+                                        useVirtualBalance = useVirtualBalance,
+                                        onUseVirtualBalanceChange = { useVirtualBalance = it; saveGoal() }
                                     )
                                 }
                             }
@@ -313,11 +325,11 @@ fun GoalSettingContent(
                             },
                             modifier = Modifier.fillMaxWidth().height(52.dp),
                             shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, NotionBorder)
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                         ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp), tint = NotionTextSecondary)
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("設定を変更する", color = NotionTextSecondary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text("設定を変更する", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                     1 -> {
@@ -326,9 +338,9 @@ fun GoalSettingContent(
                                 onClick = { isSimulationView = false },
                                 modifier = Modifier.weight(1f).height(52.dp),
                                 shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(1.dp, NotionBorder)
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                             ) {
-                                Text("戻る", color = NotionTextPrimary)
+                                Text("戻る", color = MaterialTheme.colorScheme.onSurface)
                             }
                             Button(
                                 onClick = {
@@ -356,7 +368,7 @@ fun GoalSettingContent(
                             modifier = Modifier.fillMaxWidth().height(52.dp),
                             enabled = canStart,
                             shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen, disabledContainerColor = NotionBorder)
+                            colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen, disabledContainerColor = MaterialTheme.colorScheme.outline)
                         ) {
                             Text("試算する", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         }
@@ -385,8 +397,8 @@ fun GoalSettingContent(
         if (isKeypadVisible) {
             ModalBottomSheet(
                 onDismissRequest = { saveGoal(); onKeypadVisibilityChange(false) },
-                containerColor = Color.White,
-                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
+                containerColor = MaterialTheme.colorScheme.surface,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) },
                 scrimColor = Color.Transparent
             ) {
                 CustomKeypad(
@@ -465,16 +477,16 @@ fun GoalAchievedView(
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
-            color = Color(0xFFFFF9E6),
+            color = if (isSystemInDarkTheme()) Color(0xFF2D2400) else Color(0xFFFFF9E6),
             border = BorderStroke(2.dp, Color(0xFFFFD54F))
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(vertical = 20.dp, horizontal = 16.dp)
             ) {
-                Text("🎉 Congratulations! 🎉", color = Color(0xFFF57F17), fontSize = 24.sp, fontWeight = FontWeight.Black)
+                Text("🎉 Congratulations! 🎉", color = Color(0xFFFFD54F), fontSize = 24.sp, fontWeight = FontWeight.Black)
                 Spacer(Modifier.height(8.dp))
-                Text("目標を達成しました！", color = NotionTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("目標を達成しました！", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -510,7 +522,9 @@ fun GoalSetupView(
     targetDateMillis: Long,
     onDateClick: () -> Unit,
     dateFormatter: SimpleDateFormat,
-    isAmountTooLow: Boolean
+    isAmountTooLow: Boolean,
+    useVirtualBalance: Boolean,
+    onUseVirtualBalanceChange: (Boolean) -> Unit
 ) {
     val focusManager = LocalFocusManager.current
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -525,9 +539,9 @@ fun GoalSetupView(
                 onValueChange = onTitleChange,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                textStyle = androidx.compose.ui.text.TextStyle(color = NotionTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold),
+                textStyle = androidx.compose.ui.text.TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold),
                 decorationBox = { inner ->
-                    if (titleText.isEmpty()) Text("旅行など", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 16.sp)
+                    if (titleText.isEmpty()) Text("旅行など", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), fontSize = 16.sp)
                     inner()
                 },
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
@@ -542,11 +556,38 @@ fun GoalSetupView(
         ) {
             Text(
                 text = if (targetAmountText.isEmpty()) "¥ 0" else "¥ ${String.format(Locale.JAPAN, "%,d", targetAmountText.toLongOrNull() ?: 0L)}",
-                color = if (isAmountTooLow) Color(0xFFE57373) else NotionTextPrimary,
+                color = if (isAmountTooLow) Color(0xFFE57373) else MaterialTheme.colorScheme.onSurface,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Black
             )
         }
+        
+        Surface(
+            modifier = Modifier.fillMaxWidth().height(80.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        ) {
+            Row(modifier = Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Surface(Modifier.size(36.dp), shape = RoundedCornerShape(10.dp), color = NotionSafeGreen.copy(alpha = 0.08f)) {
+                    Icon(Icons.Default.AccountBalanceWallet, null, tint = NotionSafeGreen, modifier = Modifier.padding(8.dp))
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("計算に使用する資産", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (useVirtualBalance) "自由に使える残高" else "実資産（全て）", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        Spacer(Modifier.weight(1f))
+                        Switch(
+                            checked = useVirtualBalance,
+                            onCheckedChange = onUseVirtualBalanceChange,
+                            colors = SwitchDefaults.colors(checkedThumbColor = NotionSafeGreen, checkedTrackColor = NotionSafeGreen.copy(alpha = 0.3f))
+                        )
+                    }
+                }
+            }
+        }
+
         SetupTile(
             modifier = Modifier.fillMaxWidth().clickable { onIncomeClick() },
             icon = Icons.AutoMirrored.Filled.TrendingUp,
@@ -555,7 +596,7 @@ fun GoalSetupView(
         ) {
             Text(
                 text = if (monthlyIncomeText.isEmpty()) "¥ 0" else "¥ ${String.format(Locale.JAPAN, "%,d", monthlyIncomeText.toLongOrNull() ?: 0L)}",
-                color = NotionTextPrimary,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Black
             )
@@ -568,7 +609,7 @@ fun GoalSetupView(
         ) {
             Text(
                 text = dateFormatter.format(Date(targetDateMillis)),
-                color = NotionTextPrimary,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Black
             )
@@ -587,8 +628,8 @@ fun SetupTile(
     Surface(
         modifier = modifier.height(80.dp),
         shape = RoundedCornerShape(16.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, NotionBorder)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Row(modifier = Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(Modifier.size(36.dp), shape = RoundedCornerShape(10.dp), color = color.copy(alpha = 0.08f)) {
@@ -596,7 +637,7 @@ fun SetupTile(
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(label, fontSize = 11.sp, color = NotionTextSecondary, fontWeight = FontWeight.Medium)
+                Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
                 content()
             }
         }
@@ -621,8 +662,8 @@ fun SimulationTile(icon: androidx.compose.ui.graphics.vector.ImageVector, label:
     Surface(
         modifier = Modifier.fillMaxWidth().height(80.dp),
         shape = RoundedCornerShape(16.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, NotionBorder)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(Modifier.size(36.dp), shape = RoundedCornerShape(10.dp), color = color.copy(alpha = 0.08f)) {
@@ -630,7 +671,7 @@ fun SimulationTile(icon: androidx.compose.ui.graphics.vector.ImageVector, label:
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(label, fontSize = 11.sp, color = NotionTextSecondary, fontWeight = FontWeight.Medium)
+                Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
                 Text("¥ ${String.format(Locale.JAPAN, "%,d", value)}", color = color, fontSize = 20.sp, fontWeight = FontWeight.Black)
             }
         }
@@ -659,55 +700,65 @@ fun GoalProgressView(
     val progressRatio = if (targetAmount > 0) (actualTotalAssets.toFloat() / targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
     val progressPercent = (progressRatio * 100).toInt()
 
-    val totalGoalDays = ((targetDateMillis - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(1L)
-    val passedDays = ((System.currentTimeMillis() - startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(0L)
-    val timeProgressRatio = (passedDays.toFloat() / totalGoalDays.toFloat()).coerceIn(0f, 1f)
-
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // Full Width Row: Assets/Target
-        PriceProgressTile(
-            actual = actualTotalAssets,
-            target = targetAmount,
-            modifier = Modifier.fillMaxWidth()
-        )
+        Surface(
+            modifier = Modifier.fillMaxWidth().height(120.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        ) {
+            Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("現在の達成率", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(8.dp))
+                    Text("$progressPercent%", fontSize = 32.sp, color = NotionSafeGreen, fontWeight = FontWeight.Black)
+                }
+                Spacer(Modifier.height(12.dp))
+                LinearProgressIndicator(
+                    progress = { progressRatio },
+                    modifier = Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)),
+                    color = NotionSafeGreen,
+                    trackColor = MaterialTheme.colorScheme.outline,
+                    strokeCap = StrokeCap.Round
+                )
+            }
+        }
 
-        // Grid Row: Achievement & Time
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ProgressTile(
-                icon = Icons.Default.EmojiEvents,
-                label = "達成率",
-                percent = progressPercent,
-                ratio = progressRatio,
-                color = Color(0xFF2196F3),
-                modifier = Modifier.weight(1f)
+            PriceProgressTile(
+                actual = actualTotalAssets,
+                target = targetAmount,
+                modifier = Modifier.weight(1.2f)
             )
             ProgressTile(
                 icon = Icons.Default.Timer,
-                label = "期限",
+                label = "期限まで",
                 extra = if (remainingDays > 0) "$remainingDays 日" else "本日",
-                ratio = timeProgressRatio,
-                color = NotionSafeGreen,
-                modifier = Modifier.weight(1f)
+                ratio = 0f,
+                color = NotionTextPrimary,
+                modifier = Modifier.weight(0.8f),
+                showBar = false
             )
         }
 
-        // Grid Row: Spendable & Budget
         if (showSimulationTiles) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CompactSimulationTile(
-                    icon = Icons.Default.Wallet,
-                    label = "許容支出",
-                    value = totalSpendable,
-                    color = Color(0xFF2196F3),
-                    modifier = Modifier.weight(1f)
-                )
-                CompactSimulationTile(
-                    icon = Icons.Default.CalendarMonth,
-                    label = "月の予算",
-                    value = monthlyBudget,
-                    color = Color(0xFF2196F3),
-                    modifier = Modifier.weight(1f)
-                )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            ) {
+                Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("1ヶ月の予算", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("¥ ${String.format(Locale.JAPAN, "%,d", monthlyBudget)}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = NotionSafeGreen)
+                    }
+                    Box(modifier = Modifier.width(1.dp).height(30.dp).background(MaterialTheme.colorScheme.outline).align(Alignment.CenterVertically))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("合計許容支出", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("¥ ${String.format(Locale.JAPAN, "%,d", totalSpendable)}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
             }
         }
 
@@ -733,8 +784,8 @@ fun PriceProgressTile(
     Surface(
         modifier = modifier.height(110.dp),
         shape = RoundedCornerShape(20.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, NotionBorder)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -746,7 +797,7 @@ fun PriceProgressTile(
                     Icon(Icons.Default.AccountBalance, null, tint = Color(0xFF2196F3), modifier = Modifier.padding(6.dp))
                 }
                 Spacer(Modifier.width(12.dp))
-                Text("貯蓄状況", fontSize = 12.sp, color = NotionTextSecondary, fontWeight = FontWeight.Medium)
+                Text("貯蓄状況", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
             }
             Spacer(modifier = Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.Bottom) {
@@ -759,7 +810,7 @@ fun PriceProgressTile(
                 Spacer(Modifier.width(12.dp))
                 Text(
                     text = "/ ¥ ${String.format(Locale.JAPAN, "%,d", target)}",
-                    color = NotionTextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(bottom = 4.dp)
@@ -779,13 +830,14 @@ fun ProgressTile(
     extra: String? = null,
     ratio: Float,
     color: Color,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showBar: Boolean = true
 ) {
     Surface(
         modifier = modifier.height(110.dp),
         shape = RoundedCornerShape(20.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, NotionBorder)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -797,30 +849,31 @@ fun ProgressTile(
                     Icon(icon, null, tint = color, modifier = Modifier.padding(6.dp))
                 }
                 Spacer(Modifier.width(10.dp))
-                Text(label, color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
             
             Spacer(modifier = Modifier.height(6.dp))
             
             Row(verticalAlignment = Alignment.Bottom) {
                 if (percent != null) {
-                    Text("$percent", color = NotionTextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Black)
-                    Text("%", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 2.dp, start = 1.dp))
+                    Text("$percent", color = MaterialTheme.colorScheme.onSurface, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                    Text("%", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 2.dp, start = 1.dp))
                 }
                 if (extra != null) {
-                    Text(extra, color = NotionTextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                    Text(extra, color = MaterialTheme.colorScheme.onSurface, fontSize = 22.sp, fontWeight = FontWeight.Black)
                 }
             }
             
-            Spacer(modifier = Modifier.height(6.dp))
-            
-            LinearProgressIndicator(
-                progress = { ratio },
-                modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
-                color = color,
-                trackColor = NotionBorder,
-                strokeCap = StrokeCap.Round
-            )
+            if (showBar) {
+                Spacer(modifier = Modifier.height(6.dp))
+                LinearProgressIndicator(
+                    progress = { ratio },
+                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                    color = color,
+                    trackColor = MaterialTheme.colorScheme.outline,
+                    strokeCap = StrokeCap.Round
+                )
+            }
         }
     }
 }
@@ -838,8 +891,8 @@ fun CompactSimulationTile(
     Surface(
         modifier = modifier.height(110.dp),
         shape = RoundedCornerShape(20.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, NotionBorder)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -851,7 +904,7 @@ fun CompactSimulationTile(
                     Icon(icon, null, tint = color, modifier = Modifier.padding(6.dp))
                 }
                 Spacer(modifier = Modifier.width(10.dp))
-                Text(label, fontSize = 12.sp, color = NotionTextSecondary, fontWeight = FontWeight.Medium)
+                Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
@@ -881,7 +934,8 @@ fun AiAdvisorCard(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 180.dp)
-            .background(Color(0xFFF5F5F5), RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
             .padding(16.dp),
         contentAlignment = if (isAiWaiting) Alignment.Center else Alignment.TopStart
     ) {
@@ -893,7 +947,7 @@ fun AiAdvisorCard(
                     strokeWidth = 3.dp
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                Text("AIの状態を確認中...", color = NotionTextSecondary, fontSize = 12.sp)
+                Text("AIの状態を確認中...", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -923,8 +977,8 @@ fun AiAdvisorCard(
                             enabled = !aiIsGenerating,
                             modifier = Modifier.size(28.dp),
                             shape = RoundedCornerShape(8.dp),
-                            color = if (aiIsGenerating) NotionBorder.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.1f),
-                            contentColor = if (aiIsGenerating) NotionTextSecondary.copy(alpha = 0.5f) else themeColor
+                            color = if (aiIsGenerating) MaterialTheme.colorScheme.outline.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.1f),
+                            contentColor = if (aiIsGenerating) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else themeColor
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
@@ -937,8 +991,8 @@ fun AiAdvisorCard(
                             enabled = !aiIsGenerating && hasText,
                             modifier = Modifier.height(28.dp),
                             shape = RoundedCornerShape(8.dp),
-                            color = if (aiIsGenerating || !hasText) NotionBorder.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.1f),
-                            contentColor = if (aiIsGenerating || !hasText) NotionTextSecondary.copy(alpha = 0.5f) else themeColor
+                            color = if (aiIsGenerating || !hasText) MaterialTheme.colorScheme.outline.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.1f),
+                            contentColor = if (aiIsGenerating || !hasText) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else themeColor
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 8.dp),
@@ -961,17 +1015,17 @@ fun AiAdvisorCard(
                     Spacer(Modifier.height(10.dp))
                 }
                 if (aiStatusLabel != null) {
-                    Text(aiStatusLabel, color = NotionTextSecondary.copy(alpha = 0.6f), fontSize = 12.sp)
+                    Text(aiStatusLabel, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 12.sp)
                 } else if (aiStatus == FeatureStatus.UNAVAILABLE) {
                     val uriHandler = LocalUriHandler.current
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(text = "Gemini Nanoに対応したデバイスのみ利用可能です。\n対応デバイスは下記リンクをご覧ください。", color = NotionTextPrimary, fontSize = 12.sp, lineHeight = 18.sp)
+                        Text(text = "Gemini Nanoに対応したデバイスのみ利用可能です。\n対応デバイスは下記リンクをご覧ください。", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, lineHeight = 18.sp)
                         Text(text = "https://developers.google.com/ml-kit/genai?hl=ja", color = Color(0xFF1976D2), fontSize = 12.sp, modifier = Modifier.clickable { uriHandler.openUri("https://developers.google.com/ml-kit/genai?hl=ja") })
                     }
                 } else if (goalAiText.isNotEmpty()) {
-                    Text(goalAiText, color = NotionTextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
+                    Text(goalAiText, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 18.sp)
                 } else if (defaultText != null) {
-                    Text(defaultText, color = NotionTextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
+                    Text(defaultText, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 18.sp)
                 }
             }
         }
@@ -987,7 +1041,7 @@ private fun GoalStepper(currentStep: Int) {
         steps.forEachIndexed { index, label ->
             val isActive = index == currentStep
             val isDone = index < currentStep
-            val color = if (isActive || isDone) stepColors[index] else NotionBorder
+            val color = if (isActive || isDone) stepColors[index] else MaterialTheme.colorScheme.outline
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier.size(20.dp).background(color.copy(alpha = if (isActive) 0.15f else 0.05f), CircleShape).border(1.5.dp, color, CircleShape),
@@ -997,10 +1051,10 @@ private fun GoalStepper(currentStep: Int) {
                     else Text("${index + 1}", color = color, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.width(4.dp))
-                Text(label, color = if (isActive) color else NotionTextSecondary, fontSize = 11.sp, fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal)
+                Text(label, color = if (isActive) color else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal)
             }
             if (index < steps.size - 1) {
-                Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 6.dp).background(if (index < currentStep) stepColors[index] else NotionBorder))
+                Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 6.dp).background(if (index < currentStep) stepColors[index] else MaterialTheme.colorScheme.outline))
             }
         }
     }

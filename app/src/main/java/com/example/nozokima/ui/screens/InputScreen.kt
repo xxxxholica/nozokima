@@ -59,6 +59,7 @@ import com.example.nozokima.ui.components.ScreenHeader
 import com.example.nozokima.ui.components.SuccessOverlay
 import com.example.nozokima.util.evaluateExpression
 import com.example.nozokima.util.formatAmountWithCommas
+import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.launch
 import ui.theme.*
 import java.io.File
@@ -591,24 +592,22 @@ fun InputScreen(
                                 メモ：$currentMemo
                                 資産（${asset.name}）の現在の残高：${asset.amount} 円
                                 
-                                あなたは「家計の覗き魔」として、この支出に対して丁寧な言葉遣いながらも、痛いところを突き、ユーザーの浪費を煽るような皮肉めいた一言を1行で返してください。
+                                あなたは「家計の覗き魔」として、この支出に対して丁寧な言葉遣いながらも、事実に基づいた鋭い指摘や、ユーザーが家計を見直すきっかけになるような皮肉めいた一言を1行で返してください。
                                 
                                 【性格・トーン】
-                                ・表面上は丁寧（です・ます調）ですが、内容は非常に手厳しく、ユーザーの自尊心を少し刺激するような「煽り」を重視してください。
-                                ・残高が十分にある場合でも、「それがいつまで続くでしょうか？」「油断していませんか？」といった形で、将来の不安や現在の緩みを突いてください。
-                                ・「楽しめましたか？」「高価だとは思いませんか？」といった、相手の良心や理性に問いかける表現を好みます。
+                                ・表面上は丁寧（です・ます調）ですが、内容は手厳しく、ユーザーの自尊心を少し刺激するような「鋭い指摘」を重視してください。
+                                ・単なる罵倒ではなく、事実（残高や金額）に基づいた、思わず納得してしまうような皮肉を好みます。
+                                ・「楽しめましたか？」「高価だとは思いませんか？」といった、相手の理性や良心に問いかける表現を使ってください。
                                 
                                 【構成のヒント】
-                                1. 支出への形式的な肯定や問いかけ
-                                2. 事実（残高や金額）に基づいた鋭い皮肉や指摘
-                                3. 自制や将来を案じさせる煽りの問いかけ
+                                1. 支出への形式的な肯定や、その内容への鋭い一言
+                                2. 事実に基づいた皮肉や、将来への軽い煽り
                                 
                                 【禁止事項】
-                                ・「ユーモアを交えて回答します」といった自己言及
-                                ・自己紹介、挨拶、タメ口、精神論
-                                ・「明日からは、必要でしたか？」のような、時系列の矛盾した不自然な日本語
+                                ・過度な罵倒、人格否定、不快感のみを与える表現
+                                ・自己紹介、挨拶、タメ口
                                 
-                                自然かつ最も「刺さる」煽りの指摘のみを「直接」1行で出力してください。
+                                自然かつ最も「刺さる」指摘のみを「直接」1行で出力してください。
                             """.trimIndent()
                             val advice = gemini.generateResponse(prompt)
                             successInfo = successInfo?.copy(aiAdvice = advice)
@@ -649,7 +648,7 @@ fun InputScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(NotionBackground)
+            .background(MaterialTheme.colorScheme.background)
             .clickable(
                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                 indication = null
@@ -665,10 +664,10 @@ fun InputScreen(
                         onClick = onBack,
                         modifier = Modifier.size(36.dp),
                         shape = RoundedCornerShape(10.dp),
-                        color = NotionTextSecondary.copy(alpha = 0.1f)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る", tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -713,7 +712,7 @@ fun InputScreen(
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.weight(1f)
                                 )
-                                if (selectedMode == "支出") {
+                                if (selectedMode == "支出" && gemini != null && gemini.status.collectAsState().value != FeatureStatus.UNAVAILABLE) {
                                     IconButton(
                                         onClick = { showOcrOptions = true },
                                         modifier = Modifier
@@ -733,7 +732,7 @@ fun InputScreen(
                                 Box(
                                     modifier = Modifier
                                         .matchParentSize()
-                                        .background(Color.White.copy(alpha = 0.8f), RoundedCornerShape(20.dp)),
+                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f), RoundedCornerShape(20.dp)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -754,11 +753,11 @@ fun InputScreen(
                 if (showOcrOptions) {
                     ModalBottomSheet(
                         onDismissRequest = { showOcrOptions = false },
-                        containerColor = Color.White,
-                        dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) }
                     ) {
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
-                            Text("レシート読み取り", modifier = Modifier.padding(vertical = 16.dp), color = NotionTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Text("レシート読み取り", modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurface, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                             
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -831,8 +830,8 @@ fun InputScreen(
                                 onClick = { selectedMode = mode },
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(12.dp),
-                                color = if (isSelected) modeColor.copy(alpha = 0.12f) else Color.White,
-                                border = BorderStroke(1.dp, if (isSelected) modeColor else NotionBorder)
+                                color = if (isSelected) modeColor.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, if (isSelected) modeColor else MaterialTheme.colorScheme.outline)
                             ) {
                                 Column(
                                     modifier = Modifier.padding(vertical = 10.dp),
@@ -842,13 +841,13 @@ fun InputScreen(
                                     Icon(
                                         imageVector = modeIcon,
                                         contentDescription = null,
-                                        tint = if (isSelected) modeColor else NotionTextSecondary,
+                                        tint = if (isSelected) modeColor else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = mode,
-                                        color = if (isSelected) modeColor else NotionTextSecondary,
+                                        color = if (isSelected) modeColor else MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 11.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                     )
@@ -857,14 +856,14 @@ fun InputScreen(
                         }
                     }
 
-                    HorizontalDivider(thickness = 1.dp, color = NotionBorder, modifier = Modifier.padding(vertical = 4.dp))
+                    HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 4.dp))
 
                     val isDetailEnabled = selectedMode != "回収" || selectedLending != null
                     val detailAlpha = if (isDetailEnabled) 1f else 0.5f
 
                     Text(
                         "詳細情報",
-                        color = NotionTextPrimary.copy(alpha = detailAlpha),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = detailAlpha),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(start = 4.dp)
@@ -943,8 +942,8 @@ fun InputScreen(
                             .alpha(detailAlpha)
                             .bringIntoViewRequester(memoBringIntoViewRequester),
                         shape = RoundedCornerShape(16.dp),
-                        color = Color.White,
-                        border = BorderStroke(1.dp, NotionBorder)
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                     ) {
                         Row(
                             modifier = Modifier.padding(16.dp),
@@ -964,7 +963,7 @@ fun InputScreen(
                             }
                             Spacer(Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("メモ", fontSize = 12.sp, color = NotionTextSecondary)
+                                Text("メモ", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 androidx.compose.foundation.text.BasicTextField(
                                     value = memoText,
                                     onValueChange = { memoText = it },
@@ -982,13 +981,13 @@ fun InputScreen(
                                         },
                                     enabled = isDetailEnabled,
                                     singleLine = true,
-                                    textStyle = TextStyle(fontSize = 15.sp, color = NotionTextPrimary, fontWeight = FontWeight.SemiBold),
+                                    textStyle = TextStyle(fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold),
                                     cursorBrush = SolidColor(accentColor),
                                     keyboardOptions = KeyboardOptions(
                                         imeAction = if (selectedMode == "貸付") ImeAction.Next else ImeAction.Done
                                     ),
                                     decorationBox = { inner ->
-                                        if (memoText.isEmpty()) Text("メモを入力", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
+                                        if (memoText.isEmpty()) Text("メモを入力", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), fontSize = 15.sp)
                                         inner()
                                     }
                                 )
@@ -1003,8 +1002,8 @@ fun InputScreen(
                                 .alpha(detailAlpha)
                                 .bringIntoViewRequester(personBringIntoViewRequester),
                             shape = RoundedCornerShape(16.dp),
-                            color = Color.White,
-                            border = BorderStroke(1.dp, NotionBorder)
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                         ) {
                             Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Surface(Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = accentColor.copy(alpha = 0.08f)) {
@@ -1012,7 +1011,7 @@ fun InputScreen(
                                 }
                                 Spacer(modifier = Modifier.width(16.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("貸した相手", fontSize = 12.sp, color = NotionTextSecondary)
+                                    Text("貸した相手", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     androidx.compose.foundation.text.BasicTextField(
                                         value = personName,
                                         onValueChange = { personName = it },
@@ -1030,13 +1029,13 @@ fun InputScreen(
                                             },
                                         enabled = isDetailEnabled,
                                         singleLine = true,
-                                        textStyle = TextStyle(color = NotionTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                                        textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
                                         keyboardOptions = KeyboardOptions(
                                             imeAction = ImeAction.Done,
                                             capitalization = KeyboardCapitalization.Words
                                         ),
                                         decorationBox = { inner ->
-                                            if (personName.isEmpty()) Text("名前を入力", color = NotionTextSecondary.copy(alpha = 0.5f), fontSize = 15.sp)
+                                            if (personName.isEmpty()) Text("名前を入力", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), fontSize = 15.sp)
                                             inner()
                                         }
                                     )
@@ -1059,7 +1058,7 @@ fun InputScreen(
                     .fillMaxWidth()
                     .background(
                         brush = Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, NotionBackground.copy(alpha = 0.9f), NotionBackground),
+                            colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.9f), MaterialTheme.colorScheme.background),
                             startY = 0f
                         )
                     )
@@ -1073,7 +1072,7 @@ fun InputScreen(
                         .height(56.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = accentColor,
-                        disabledContainerColor = NotionBorder
+                        disabledContainerColor = MaterialTheme.colorScheme.outline
                     ),
                     shape = RoundedCornerShape(16.dp),
                     enabled = isSaveEnabled
@@ -1104,8 +1103,8 @@ fun InputScreen(
         if (showKeypad) {
             ModalBottomSheet(
                 onDismissRequest = { showKeypad = false },
-                containerColor = Color.White,
-                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
+                containerColor = MaterialTheme.colorScheme.surface,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) },
                 scrimColor = Color.Transparent
             ) {
                 CustomKeypad(
@@ -1150,11 +1149,11 @@ fun InputScreen(
         if (showTypeSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showTypeSheet = false },
-                containerColor = Color.White,
-                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+                containerColor = MaterialTheme.colorScheme.surface,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) }
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
-                    Text("タイプを選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NotionTextPrimary)
+                    Text("タイプを選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
                     
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         modes.chunked(4).forEach { rowItems ->
@@ -1203,11 +1202,11 @@ fun InputScreen(
         if (showPaymentMethodSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showPaymentMethodSheet = false },
-                containerColor = Color.White,
-                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+                containerColor = MaterialTheme.colorScheme.surface,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) }
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
-                    Text("支払方法を選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NotionTextPrimary)
+                    Text("支払方法を選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
                     
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         listOf("即時", "後払い", "固定費").forEach { type ->
@@ -1237,11 +1236,11 @@ fun InputScreen(
         if (showCategorySheet) {
             ModalBottomSheet(
                 onDismissRequest = { showCategorySheet = false },
-                containerColor = Color.White,
-                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+                containerColor = MaterialTheme.colorScheme.surface,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) }
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
-                    Text("ジャンルを選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NotionTextPrimary)
+                    Text("ジャンルを選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
                     
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         categories.chunked(4).forEach { rowItems ->
@@ -1270,11 +1269,11 @@ fun InputScreen(
         if (showAssetSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showAssetSheet = false },
-                containerColor = Color.White,
-                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+                containerColor = MaterialTheme.colorScheme.surface,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) }
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
-                    Text("資産を選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NotionTextPrimary)
+                    Text("資産を選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
                     
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         dbAssets.chunked(4).forEach { rowItems ->
@@ -1303,11 +1302,11 @@ fun InputScreen(
         if (showToAssetSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showToAssetSheet = false },
-                containerColor = Color.White,
-                dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+                containerColor = MaterialTheme.colorScheme.surface,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) }
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
-                    Text("振替先を選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = NotionTextPrimary)
+                    Text("振替先を選択", modifier = Modifier.padding(vertical = 16.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
                     
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         dbAssets.chunked(4).forEach { rowItems ->
@@ -1334,11 +1333,15 @@ fun InputScreen(
         }
 
         if (showLendingSheet) {
-            ModalBottomSheet(onDismissRequest = { showLendingSheet = false }) {
+            ModalBottomSheet(
+                onDismissRequest = { showLendingSheet = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+                dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) }
+            ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
-                    Text("回収する貸付を選択", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
+                    Text("回収する貸付を選択", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                     if (activeLendings.isEmpty()) {
-                        Text("未回収の貸付はありません", modifier = Modifier.padding(32.dp), color = NotionTextSecondary)
+                        Text("未回収の貸付はありません", modifier = Modifier.padding(32.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     activeLendings.forEach { lending ->
                         Row(
@@ -1353,8 +1356,8 @@ fun InputScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column {
-                                Text(lending.personName, fontWeight = FontWeight.Bold)
-                                Text(lending.memo.ifBlank { "無題" }, fontSize = 12.sp, color = NotionTextSecondary)
+                                Text(lending.personName, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                Text(lending.memo.ifBlank { "無題" }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Text("¥ ${String.format(Locale.JAPAN, "%,d", lending.amount - lending.recoveredAmount)}", color = Color(0xFFFB8C00), fontWeight = FontWeight.Bold)
                         }
@@ -1387,7 +1390,7 @@ fun InputScreen(
         if (showOcrResultPage) {
             Surface(
                 modifier = Modifier.fillMaxSize(),
-                color = NotionBackground
+                color = MaterialTheme.colorScheme.background
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     Column(modifier = Modifier.fillMaxSize()) {
@@ -1398,10 +1401,10 @@ fun InputScreen(
                                     onClick = { showOcrResultPage = false },
                                     modifier = Modifier.size(36.dp),
                                     shape = RoundedCornerShape(10.dp),
-                                    color = NotionTextSecondary.copy(alpha = 0.1f)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
-                                        Icon(Icons.Default.Close, contentDescription = "閉じる", tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.Close, contentDescription = "閉じる", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                     }
                                 }
                             }
@@ -1435,13 +1438,13 @@ fun InputScreen(
                                         Box(
                                             modifier = Modifier
                                                 .size(80.dp)
-                                                .background(NotionBorder.copy(alpha = 0.2f), CircleShape),
+                                                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), CircleShape),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
                                                 imageVector = Icons.AutoMirrored.Filled.List,
                                                 contentDescription = null,
-                                                tint = NotionTextSecondary.copy(alpha = 0.6f),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                                 modifier = Modifier.size(40.dp)
                                             )
                                             // 失敗を示すバツ印を重ねる
@@ -1455,7 +1458,7 @@ fun InputScreen(
                                         Spacer(Modifier.height(20.dp))
                                         Text(
                                             "レシートの読み取りに失敗しました",
-                                            color = NotionTextSecondary,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                             fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold,
                                             textAlign = TextAlign.Center
@@ -1463,7 +1466,7 @@ fun InputScreen(
                                         Spacer(Modifier.height(8.dp))
                                         Text(
                                             "明るい場所で再度お試しください",
-                                            color = NotionTextSecondary.copy(alpha = 0.6f),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                             fontSize = 12.sp,
                                             textAlign = TextAlign.Center
                                         )
@@ -1492,8 +1495,8 @@ fun InputScreen(
                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 },
                                             shape = RoundedCornerShape(16.dp),
-                                            color = Color.White,
-                                            border = BorderStroke(1.2.dp, if (isSelected) accentColor else NotionBorder)
+                                            color = MaterialTheme.colorScheme.surface,
+                                            border = BorderStroke(1.2.dp, if (isSelected) accentColor else MaterialTheme.colorScheme.outline)
                                         ) {
                                             Column(modifier = Modifier.padding(16.dp)) {
                                                 Row(
@@ -1505,19 +1508,19 @@ fun InputScreen(
                                                         Surface(
                                                             modifier = Modifier.size(24.dp),
                                                             shape = CircleShape,
-                                                            color = if (isSelected) accentColor else NotionTextSecondary.copy(alpha = 0.1f)
+                                                            color = if (isSelected) accentColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)
                                                         ) {
                                                             Box(contentAlignment = Alignment.Center) {
                                                                 Text(
                                                                     text = (index + 1).toString(),
-                                                                    color = if (isSelected) Color.White else NotionTextSecondary,
+                                                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                                                                     fontSize = 12.sp,
                                                                     fontWeight = FontWeight.Bold
                                                                 )
                                                             }
                                                         }
                                                         Spacer(modifier = Modifier.width(8.dp))
-                                                        Text("パターン ${index + 1}", color = NotionTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                                        Text("パターン ${index + 1}", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                                     }
                                                     if (isSelected) {
                                                         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = accentColor, modifier = Modifier.size(20.dp))
@@ -1532,7 +1535,7 @@ fun InputScreen(
                                                     Text(prediction.amount, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = accentColor, letterSpacing = (-1).sp)
                                                 }
                                                 
-                                                Text(prediction.memo, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = NotionTextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text(prediction.memo, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 
                                                 Spacer(modifier = Modifier.height(12.dp))
                                                 
@@ -1541,8 +1544,8 @@ fun InputScreen(
                                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                                 ) {
                                                     PredictionTag(prediction.categoryName, accentColor)
-                                                    PredictionTag(prediction.assetName, NotionTextSecondary)
-                                                    PredictionTag(SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(prediction.date)), NotionTextSecondary)
+                                                    PredictionTag(prediction.assetName, MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    PredictionTag(SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(prediction.date)), MaterialTheme.colorScheme.onSurfaceVariant)
                                                 }
                                             }
                                         }
@@ -1558,7 +1561,7 @@ fun InputScreen(
                                 .fillMaxWidth()
                                 .background(
                                     brush = Brush.verticalGradient(
-                                        colors = listOf(Color.Transparent, NotionBackground.copy(alpha = 0.9f), NotionBackground),
+                                        colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.9f), MaterialTheme.colorScheme.background),
                                         startY = 0f
                                     )
                                 )
@@ -1593,7 +1596,7 @@ fun InputScreen(
 fun PredictionTag(text: String, color: Color) {
     Surface(
         shape = RoundedCornerShape(6.dp),
-        color = color.copy(alpha = 0.08f),
+        color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, color.copy(alpha = 0.12f))
     ) {
         Text(
@@ -1634,8 +1637,8 @@ fun PatternCardSkeleton() {
             .fillMaxWidth()
             .padding(bottom = 12.dp),
         shape = RoundedCornerShape(16.dp),
-        color = Color.White,
-        border = BorderStroke(1.2.dp, NotionBorder)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.outline)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(

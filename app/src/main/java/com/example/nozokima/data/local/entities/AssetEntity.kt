@@ -9,5 +9,6 @@ data class AssetEntity(
     val name: String,
     val amount: Int,
     val category: String,
-    val lastUpdated: Long
+    val lastUpdated: Long,
+    val pointAmount: Int = 0
 )

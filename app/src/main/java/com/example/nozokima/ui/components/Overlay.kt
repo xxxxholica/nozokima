@@ -35,17 +35,22 @@ fun SuccessOverlay(
     val displayDuration = 5000L // 5秒
     var progress by remember { mutableFloatStateOf(1f) }
     
-    LaunchedEffect(Unit) {
-        visible = true
-        val startTime = System.currentTimeMillis()
-        while (System.currentTimeMillis() - startTime < displayDuration) {
-            val elapsed = System.currentTimeMillis() - startTime
-            progress = 1f - (elapsed.toFloat() / displayDuration)
-            kotlinx.coroutines.delay(50)
+    LaunchedEffect(info.aiAdvice) {
+        if (info.aiAdvice != null || info.mode != "支出") {
+            visible = true
+            val startTime = System.currentTimeMillis()
+            while (System.currentTimeMillis() - startTime < displayDuration) {
+                val elapsed = System.currentTimeMillis() - startTime
+                progress = 1f - (elapsed.toFloat() / displayDuration)
+                kotlinx.coroutines.delay(50)
+            }
+            visible = false
+            kotlinx.coroutines.delay(400)
+            onDismiss()
+        } else {
+            // AIアドバイス待ち
+            visible = true
         }
-        visible = false
-        kotlinx.coroutines.delay(400)
-        onDismiss()
     }
 
     val accentColor = when (info.mode) {

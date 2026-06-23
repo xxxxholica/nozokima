@@ -78,7 +78,7 @@ fun AppLockScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(NotionBackground)
+            .background(MaterialTheme.colorScheme.background)
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -104,7 +104,7 @@ fun AppLockScreen(
             text = if (isLockedOut) "入力を一時制限しています" else "アプリはロックされています",
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
-            color = NotionTextPrimary
+            color = MaterialTheme.colorScheme.onBackground
         )
         
         if (isLockedOut) {
@@ -120,21 +120,18 @@ fun AppLockScreen(
         
         if (!isLockedOut) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.horizontalScroll(rememberScrollState())
             ) {
-                repeat(inputPassword.length) {
+                repeat(4) { index ->
+                    val isActive = index < inputPassword.length
                     Box(
                         modifier = Modifier
                             .size(16.dp)
                             .clip(CircleShape)
-                            .background(NotionSafeGreen)
-                            .border(1.dp, NotionSafeGreen, CircleShape)
+                            .background(if (isActive) NotionSafeGreen else Color.Transparent)
+                            .border(1.5.dp, NotionSafeGreen, CircleShape)
                     )
-                }
-                if (inputPassword.isEmpty()) {
-                    Text(" ", fontSize = 16.sp) // Maintain height
                 }
             }
         } else {
@@ -155,7 +152,7 @@ fun AppLockScreen(
 
         PinKeypad(
             onNumberClick = { num ->
-                if (inputPassword.length < 12 && !isLockedOut) {
+                if (inputPassword.length < 4 && !isLockedOut) {
                     inputPassword += num
                     isError = false
                 }
@@ -236,7 +233,7 @@ fun PinKeypad(
                             .weight(1f)
                             .aspectRatio(1.2f)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(if (isAction) (if (isConfirmEnabled) NotionSafeGreen else NotionBorder) else Color.White)
+                            .background(if (isAction) (if (isConfirmEnabled) NotionSafeGreen else MaterialTheme.colorScheme.outline) else MaterialTheme.colorScheme.surface)
                             .then(if (!isAction || isConfirmEnabled) Modifier.clickable {
                                 when {
                                     isDelete -> onDeleteClick()
@@ -244,13 +241,13 @@ fun PinKeypad(
                                     else -> onNumberClick(key)
                                 }
                             } else Modifier)
-                            .border(1.dp, if (isAction) Color.Transparent else NotionBorder, RoundedCornerShape(16.dp)),
+                            .border(1.dp, if (isAction) Color.Transparent else MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         when {
-                            isDelete -> Icon(Icons.AutoMirrored.Filled.Backspace, null, tint = NotionTextPrimary, modifier = Modifier.size(24.dp))
+                            isDelete -> Icon(Icons.AutoMirrored.Filled.Backspace, null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
                             isAction -> Text(text = confirmLabel, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                            else -> Text(text = key, color = NotionTextPrimary, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+                            else -> Text(text = key, color = MaterialTheme.colorScheme.onSurface, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }

@@ -11,6 +11,7 @@ import androidx.biometric.BiometricManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.animation.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -106,14 +107,6 @@ class MainActivity : FragmentActivity() {
         }
 
         setContent {
-            val view = androidx.compose.ui.platform.LocalView.current
-            if (!view.isInEditMode) {
-                SideEffect {
-                    val window = (view.context as android.app.Activity).window
-                    WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = true
-                }
-            }
-
             val dao = remember { db.financeDao() }
             val factory = remember { ViewModelFactory(dao, gemini) }
             val mainViewModel: MainViewModel = viewModel(factory = factory)
@@ -121,7 +114,28 @@ class MainActivity : FragmentActivity() {
             
             val mainUiState by mainViewModel.uiState.collectAsState()
             val homeUiState by homeViewModel.uiState.collectAsState()
-            val scope = rememberCoroutineScope()
+
+            val appSettings = mainUiState.appSettings ?: AppSettingsEntity()
+            val themeMode = appSettings.themeMode
+
+            NozokimaTheme(themeMode = themeMode) {
+                val view = androidx.compose.ui.platform.LocalView.current
+                val isDark = isSystemInDarkTheme()
+                val currentThemeMode = themeMode
+                
+                if (!view.isInEditMode) {
+                    SideEffect {
+                        val window = (view.context as android.app.Activity).window
+                        val isAppearanceLight: Boolean = when (currentThemeMode) {
+                            "LIGHT" -> true
+                            "DARK" -> false
+                            else -> !isDark
+                        }
+                        WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = isAppearanceLight
+                    }
+                }
+
+                val scope = rememberCoroutineScope()
             val snackbarHostState = remember { SnackbarHostState() }
 
             var selectedTab by remember { mutableIntStateOf(0) }
@@ -144,6 +158,7 @@ class MainActivity : FragmentActivity() {
             val isExternalActivityLaunching = rememberSaveable { mutableStateOf(false) }
             val appSettings = mainUiState.appSettings ?: AppSettingsEntity()
             val isLoading = !mainUiState.isLoaded
+            val isSetupCompleted = appSettings.isSetupCompleted
             val showLockScreen = isAppLocked.value && appSettings.isAppLockEnabled
             val lifecycle = LocalLifecycleOwner.current.lifecycle
 
@@ -210,8 +225,8 @@ class MainActivity : FragmentActivity() {
 
                 ModalBottomSheet(
                     onDismissRequest = { showAppLockPasswordDialog = false },
-                    containerColor = Color.White,
-                    dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) },
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) },
                     sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
                 ) {
                     Column(
@@ -231,7 +246,7 @@ class MainActivity : FragmentActivity() {
                             else -> "ロックの解除"
                         }
                         
-                        Text(text = title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = NotionTextPrimary)
+                        Text(text = title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                         
                         Spacer(Modifier.height(12.dp))
                         
@@ -239,12 +254,12 @@ class MainActivity : FragmentActivity() {
                             isDisableMode -> "ロックを解除するには現在のパスワードを入力してください"
                             isChangeMode -> when(step) {
                                 0 -> "現在のパスワードを入力してください"
-                                1 -> "新しいパスワード（4〜12桁）を入力してください"
+                                1 -> "新しいパスワードを入力してください"
                                 else -> "もう一度入力してください"
                             }
-                            else -> if (step == 0) "パスワード（4〜12桁）を入力してください" else "もう一度入力してください"
+                            else -> if (step == 0) "パスワードを入力してください" else "もう一度入力してください"
                         }
-                        Text(description, fontSize = 13.sp, color = NotionTextSecondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Text(description, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         
                         Spacer(Modifier.height(32.dp))
                         
@@ -261,13 +276,13 @@ class MainActivity : FragmentActivity() {
                         ) {
                             Spacer(Modifier.weight(1f))
                             // パスワードの入力インジケーターをリッチに
-                            repeat(12) { index ->
+                            repeat(4) { index ->
                                 val isActive = index < currentInputText.length
                                 Box(
                                     modifier = Modifier
-                                        .size(if (isActive) 14.dp else 12.dp)
+                                        .size(if (isActive) 16.dp else 14.dp)
                                         .clip(CircleShape)
-                                        .background(if (isActive) NotionSafeGreen else NotionBorder)
+                                        .background(if (isActive) NotionSafeGreen else MaterialTheme.colorScheme.outline)
                                         .then(if (isActive) Modifier.border(2.dp, NotionSafeGreen.copy(alpha = 0.2f), CircleShape) else Modifier)
                                 )
                             }
@@ -279,9 +294,9 @@ class MainActivity : FragmentActivity() {
                         PinKeypad(
                             onNumberClick = { num ->
                                 when(step) {
-                                    0 -> if (currentPasswordInput.length < 12) currentPasswordInput += num
-                                    1 -> if (newPasswordInput.length < 12) newPasswordInput += num
-                                    2 -> if (confirmPasswordInput.length < 12) confirmPasswordInput += num
+                                    0 -> if (currentPasswordInput.length < 4) currentPasswordInput += num
+                                    1 -> if (newPasswordInput.length < 4) newPasswordInput += num
+                                    2 -> if (confirmPasswordInput.length < 4) confirmPasswordInput += num
                                 }
                             },
                             onDeleteClick = {
@@ -337,7 +352,7 @@ class MainActivity : FragmentActivity() {
                                         } else {
                                             if (newPasswordInput == confirmPasswordInput) {
                                                 scope.launch {
-                                                    dao.upsertAppSettings(appSettings.copy(appLockPassword = newPasswordInput, isAppLockEnabled = true))
+                                                    dao.upsertAppSettings(appSettings.copy(appLockPassword = newPasswordInput, isAppLockEnabled = true, isBiometricEnabled = true))
                                                     showAppLockPasswordDialog = false
                                                     snackbarHostState.showSnackbar("パスワードを設定しました")
                                                 }
@@ -474,13 +489,15 @@ class MainActivity : FragmentActivity() {
                     ) {
                         focusManager.clearFocus()
                     },
-                color = NotionBackground
+                color = MaterialTheme.colorScheme.background
             ) {
                 if (isLoading) {
                     // 読み込み中（一瞬のチラつき防止）
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         // 必要に応じてロゴなどを配置
                     }
+                } else if (!isSetupCompleted) {
+                    SetupWizardScreen(dao = dao, onComplete = { /* UI will refresh */ })
                 } else if (showLockScreen) {
                     AppLockScreen(
                         correctPassword = appSettings.appLockPassword ?: "",
@@ -512,6 +529,7 @@ class MainActivity : FragmentActivity() {
                 } else {
                     Box(modifier = Modifier.fillMaxSize()) {
                         Scaffold(
+                            containerColor = MaterialTheme.colorScheme.background,
                             contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
                         ) { innerPadding ->
                             Box(modifier = Modifier.fillMaxSize()) {
@@ -674,6 +692,12 @@ class MainActivity : FragmentActivity() {
                                                                 },
                                                                 onImportClick = { importLauncher.launch(arrayOf("*/*")) },
                                                                 onCategoryManagementClick = { selectedTab = 5 },
+                                                                themeMode = themeMode,
+                                                                onThemeModeChange = { newMode ->
+                                                                    scope.launch {
+                                                                        dao.upsertAppSettings(appSettings.copy(themeMode = newMode))
+                                                                    }
+                                                                },
                                                                 onBack = { selectedTab = 0 }
                                                             )
                                                         }
@@ -704,6 +728,7 @@ class MainActivity : FragmentActivity() {
                                     }
                 }
             }
+            } // End of NozokimaTheme
         }
     }
 }

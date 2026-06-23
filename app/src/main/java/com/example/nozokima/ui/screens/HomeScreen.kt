@@ -3,6 +3,7 @@ package com.example.nozokima.ui.screens
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.example.nozokima.data.local.FinanceDao
 import com.example.nozokima.data.local.entities.*
 import com.example.nozokima.ui.components.getCategoryIcon
+import com.example.nozokima.ui.components.ThinkingAnimation
 import com.example.nozokima.ui.viewmodel.HomeViewModel
 import com.example.nozokima.ui.viewmodel.HomeUiState
 import com.google.mlkit.genai.common.FeatureStatus
@@ -64,9 +66,14 @@ fun HomeScreen(
         }
     }
 
-    // 初回生成の自動トリガー
-    LaunchedEffect(uiState.isAiReady, uiState.transactions, uiState.lendings) {
-        if (uiState.isAiReady && uiState.homeAiText.isEmpty() && !uiState.isAiGenerating) {
+    // 最新の支出を監視
+    val latestTxId = remember(uiState.transactions) {
+        uiState.transactions.asSequence().filter { it.isExpense && it.category != "貸付" }.maxByOrNull { it.date }?.id
+    }
+
+    // 初回生成および最新支出変更時の自動トリガー
+    LaunchedEffect(uiState.isAiReady, latestTxId) {
+        if (uiState.isAiReady && !uiState.isAiGenerating) {
             viewModel.triggerHomeAnalysis()
         }
     }
@@ -74,6 +81,7 @@ fun HomeScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState()),
     ) {
         Row(
@@ -86,7 +94,7 @@ fun HomeScreen(
                 text = greeting,
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Black,
-                color = NotionTextPrimary,
+                color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = 40.dp)
@@ -97,9 +105,9 @@ fun HomeScreen(
                 onClick = onSettingsClick,
                 modifier = Modifier
                     .size(40.dp)
-                    .background(NotionBorder.copy(alpha = 0.3f), CircleShape)
+                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), CircleShape)
             ) {
-                Icon(Icons.Default.Settings, contentDescription = "設定", tint = NotionTextSecondary)
+                Icon(Icons.Default.Settings, contentDescription = "設定", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
@@ -107,7 +115,7 @@ fun HomeScreen(
             DashboardCard(
                 uiState = uiState,
                 appSettings = appSettings,
-                onRefreshAi = { viewModel.triggerHomeAnalysis() },
+                onRefreshAi = { viewModel.triggerHomeAnalysis(force = true) },
                 onAiAdviceClick = onAiAdviceClick,
                 onGoalClick = onGoalClick,
             ) {
@@ -151,7 +159,7 @@ fun DashboardCard(
     val upcomingTotal = remember(uiState.scheduledExpenses) {
         uiState.scheduledExpenses.asSequence().filter { !it.isCompleted }.sumOf { it.amount }
     }
-    val virtualBalance = currentAssets - upcomingTotal
+    val virtualBalance = currentAssets - upcomingTotal - totalLendingAmount.toLong()
 
     val startOfMonth = remember {
         Calendar.getInstance().apply {
@@ -176,7 +184,8 @@ fun DashboardCard(
             val remainingDays = ((currentGoal.targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
             val remainingMonths = (remainingDays / 30.0).coerceAtLeast(0.1)
             val totalExpectedIncome = (currentGoal.monthlyIncome * remainingMonths).toLong()
-            val totalSpendable = (virtualBalance + totalExpectedIncome - currentGoal.targetAmount).coerceAtLeast(0L)
+            val currentAssetsForGoal = if (currentGoal.useVirtualBalance) virtualBalance else currentAssets
+            val totalSpendable = (currentAssetsForGoal + totalExpectedIncome - currentGoal.targetAmount).coerceAtLeast(0L)
             if (remainingMonths > 0) (totalSpendable / remainingMonths).toLong() else 0L
         } else null
     }
@@ -192,8 +201,8 @@ fun DashboardCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White, RoundedCornerShape(16.dp))
-            .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
             .padding(24.dp)
     ) {
         Column {
@@ -212,7 +221,7 @@ fun DashboardCard(
             Spacer(modifier = Modifier.height(20.dp))
             GoalProgressSection(
                 goalSetting = uiState.goalSetting,
-                actualAssetsForGoal = virtualBalance,
+                actualAssetsForGoal = if (uiState.goalSetting?.useVirtualBalance == true) virtualBalance else currentAssets,
                 onGoalClick = onGoalClick
             )
 
@@ -246,7 +255,7 @@ fun AssetHeader(
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("資産総額", color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Text("資産総額", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 IconButton(
                     onClick = onToggleVisibility,
                     modifier = Modifier.size(24.dp).padding(start = 4.dp)
@@ -255,20 +264,20 @@ fun AssetHeader(
                         imageVector = if (isAssetsVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                         contentDescription = "Toggle Assets Visibility",
                         modifier = Modifier.size(14.dp),
-                        tint = NotionTextSecondary
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
             Text(
                 text = if (isAssetsVisible) "¥ ${String.format(Locale.JAPAN, "%,d", currentAssets)}" else "¥ ••••••••",
-                color = NotionTextPrimary,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-1).sp
             )
         }
         Column(horizontalAlignment = Alignment.End) {
-            Text("リセットまで", color = NotionTextSecondary, fontSize = 10.sp)
+            Text("リセットまで", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
             Text("$daysUntilReset 日", color = NotionSafeGreen, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
     }
@@ -295,7 +304,7 @@ fun BudgetProgressSection(monthlyBudget: Long, spentThisMonth: Long, onBudgetCli
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("あといくら使える？", color = NotionTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Text("あといくら使える？", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "¥ ${String.format(Locale.JAPAN, "%,d", remainingAmount)}",
@@ -330,7 +339,7 @@ fun BudgetProgressSection(monthlyBudget: Long, spentThisMonth: Long, onBudgetCli
             progress = { animatedSpentProgress },
             modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)),
             color = if (spentThisMonth == 0L) Color.Transparent else budgetAmountColor,
-            trackColor = if (spentThisMonth == 0L) NotionSafeGreen else NotionBorder,
+            trackColor = if (spentThisMonth == 0L) NotionSafeGreen else MaterialTheme.colorScheme.outline,
             strokeCap = StrokeCap.Round
         )
     }
@@ -379,7 +388,7 @@ fun GoalProgressSection(
         ) {
             Text(
                 text = goalDisplayTitle,
-                color = if (hasGoal) NotionTextSecondary else NotionTextSecondary.copy(alpha = 0.6f),
+                color = if (hasGoal) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -394,7 +403,7 @@ fun GoalProgressSection(
                 } else {
                     Text(
                         text = "—",
-                        color = NotionTextSecondary.copy(alpha = 0.5f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -403,7 +412,7 @@ fun GoalProgressSection(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = null,
-                    tint = if (hasGoal) goalBarColor else NotionTextSecondary.copy(alpha = 0.5f),
+                    tint = if (hasGoal) goalBarColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -416,7 +425,7 @@ fun GoalProgressSection(
                 .height(12.dp)
                 .clip(RoundedCornerShape(6.dp)),
             color = goalBarColor,
-            trackColor = NotionBorder,
+            trackColor = MaterialTheme.colorScheme.outline,
             strokeCap = StrokeCap.Round
         )
     }
@@ -431,37 +440,34 @@ fun AiAnalysisSection(
 ) {
     val isWaitingForCheck = (!uiState.isAiInitialized || uiState.isAiCheckingStatus) && uiState.homeAiText.isEmpty()
     val isGeneratingNow = uiState.isAiGenerating && uiState.homeAiText.isEmpty()
-    val showProgress = isWaitingForCheck || isGeneratingNow
-    val statusLabel = when {
-        isWaitingForCheck && uiState.isAiInitialized -> "AI を確認中..."
-        isGeneratingNow   -> "分析中..."
-        else              -> null
-    }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(210.dp)
-            .background(Color(0xFFF5F5F5), RoundedCornerShape(16.dp))
-            .border(1.dp, NotionBorder, RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp))
             .padding(12.dp),
         contentAlignment = if (isWaitingForCheck) Alignment.Center else Alignment.TopStart
     ) {
         if (isWaitingForCheck) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                modifier = Modifier.heightIn(min = 150.dp), // 全体の高さをある程度維持
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(28.dp),
                     color = NotionSafeGreen,
                     strokeWidth = 3.dp
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                Text("AIの状態を確認中...", color = NotionTextSecondary, fontSize = 12.sp)
+                Text("AIの状態を確認中...", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
         } else {
             val isUnavailable = uiState.aiStatus == FeatureStatus.UNAVAILABLE
             val themeColor = if (isUnavailable) Color(0xFFE57373) else NotionSafeGreen
             
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
@@ -492,37 +498,50 @@ fun AiAnalysisSection(
                         val hasText = uiState.homeAiText.isNotEmpty()
                         
                         // 再生成ボタン (アイコンのみ)
-                        Surface(
-                            onClick = onRefreshAi,
-                            enabled = !isGenerating,
-                            modifier = Modifier.size(28.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isGenerating) NotionBorder.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.1f),
-                            contentColor = if (isGenerating) NotionTextSecondary.copy(alpha = 0.5f) else themeColor
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isGenerating) MaterialTheme.colorScheme.outline.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.15f))
+                                .clickable(enabled = !isGenerating, onClick = onRefreshAi),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = themeColor
+                            )
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        // 詳しく聞くボタン
-                        Surface(
-                            onClick = { onAiAdviceClick(uiState.homeAiText) },
-                            enabled = !isGenerating && hasText,
-                            modifier = Modifier.height(28.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isGenerating || !hasText) NotionBorder.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.1f),
-                            contentColor = if (isGenerating || !hasText) NotionTextSecondary.copy(alpha = 0.5f) else themeColor
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.Chat, null, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("詳しく聞く", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
+                // 詳しく聞くボタン
+                Box(
+                    modifier = Modifier
+                        .height(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isGenerating || !hasText) MaterialTheme.colorScheme.outline.copy(alpha = 0.5f) else themeColor.copy(alpha = 0.15f))
+                        .clickable(enabled = !isGenerating && hasText, onClick = { onAiAdviceClick(uiState.homeAiText) }),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Chat,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = themeColor
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "詳しく聞く",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = themeColor
+                        )
+                    }
+                }
                     }
                 }
                 
@@ -530,7 +549,7 @@ fun AiAnalysisSection(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.White, RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(10.dp))
                         .padding(8.dp)
                 ) {
                     if (latestExpense != null) {
@@ -547,8 +566,8 @@ fun AiAnalysisSection(
                             }
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(latestExpense.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NotionTextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(latestExpense.category, fontSize = 10.sp, color = NotionTextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(latestExpense.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(latestExpense.category, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             Text("¥ ${String.format(Locale.JAPAN, "%,d", latestExpense.amount)}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE57373))
                         }
@@ -560,50 +579,45 @@ fun AiAnalysisSection(
                             Box(
                                 modifier = Modifier
                                     .size(32.dp)
-                                    .background(NotionBorder.copy(alpha = 0.3f), RoundedCornerShape(8.dp)),
+                                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(8.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Pending, null, tint = NotionTextSecondary.copy(alpha = 0.4f), modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Pending, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(16.dp))
                             }
                             Spacer(Modifier.width(10.dp))
-                            Text("記録がありません", fontSize = 13.sp, color = NotionTextSecondary.copy(alpha = 0.4f), fontWeight = FontWeight.Medium)
+                            Text("記録がありません", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), fontWeight = FontWeight.Medium)
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-                if (showProgress) {
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)),
-                        color = NotionSafeGreen,
-                        trackColor = NotionSafeGreen.copy(alpha = 0.2f)
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                }
-                if (statusLabel != null) {
-                    Text(statusLabel, color = NotionTextSecondary.copy(alpha = 0.6f), fontSize = 12.sp)
-                } else if (uiState.aiStatus == FeatureStatus.UNAVAILABLE) {
-                    val uriHandler = LocalUriHandler.current
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                
+                Box(modifier = Modifier.heightIn(min = 72.dp)) {
+                    if (isGeneratingNow) {
+                        ThinkingAnimation()
+                    } else if (uiState.aiStatus == FeatureStatus.UNAVAILABLE) {
+                        val uriHandler = LocalUriHandler.current
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "Gemini Nanoに対応したデバイスのみ利用可能です。\n対応デバイスは下記リンクをご覧ください。",
+                                color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, lineHeight = 18.sp
+                            )
+                            Text(
+                                text = "https://developers.google.com/ml-kit/genai?hl=ja",
+                                color = Color(0xFF1976D2), fontSize = 12.sp,
+                                modifier = Modifier.clickable { uriHandler.openUri("https://developers.google.com/ml-kit/genai?hl=ja") }
+                            )
+                        }
+                    } else if (uiState.homeAiText.isNotEmpty()) {
                         Text(
-                            text = "Gemini Nanoに対応したデバイスのみ利用可能です。\n対応デバイスは下記リンクをご覧ください。",
-                            color = NotionTextPrimary, fontSize = 12.sp, lineHeight = 18.sp
-                        )
-                        Text(
-                            text = "https://developers.google.com/ml-kit/genai?hl=ja",
-                            color = Color(0xFF1976D2), fontSize = 12.sp,
-                            modifier = Modifier.clickable { uriHandler.openUri("https://developers.google.com/ml-kit/genai?hl=ja") }
+                            text = uiState.homeAiText,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                } else if (uiState.homeAiText.isNotEmpty()) {
-                    Text(
-                        text = uiState.homeAiText,
-                        color = NotionTextSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis
-                    )
                 }
             }
         }
@@ -686,8 +700,8 @@ fun QuickAccessItem(
         onClick = onClick,
         modifier = modifier.aspectRatio(1f),
         shape = RoundedCornerShape(16.dp),
-        color = Color.White,
-        border = androidx.compose.foundation.BorderStroke(1.dp, NotionBorder)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -712,7 +726,7 @@ fun QuickAccessItem(
                 text = label,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = NotionTextPrimary,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

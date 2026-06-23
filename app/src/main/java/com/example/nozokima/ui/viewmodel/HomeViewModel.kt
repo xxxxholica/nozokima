@@ -95,13 +95,19 @@ class HomeViewModel(
         initialValue = HomeUiState()
     )
 
-    fun triggerHomeAnalysis() {
+    private var lastHomeTriggerExpenseId: String? = null
+    private var lastHomeTriggerExpenseAmount: Int? = null
+    private var lastHomeTriggerExpenseName: String? = null
+    private var lastHomeTriggerSpentThisMonth: Int? = null
+    private var lastHomeTriggerVirtualBalance: Int? = null
+
+    fun triggerHomeAnalysis(force: Boolean = false) {
         val state = uiState.value
         if (!state.isAiReady || state.isAiGenerating) return
         
         // データの計算 (in background via Flow combination or here if needed immediately)
         val totalLendingAmount = state.lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
-        val currentAssets = state.assets.sumOf { it.amount } + totalLendingAmount
+        val currentAssets = (state.assets.sumOf { it.amount } + totalLendingAmount).toLong()
         val upcomingTotal = state.scheduledExpenses.asSequence().filter { !it.isCompleted }.sumOf { it.amount }
         val virtualBalance = currentAssets - upcomingTotal
 
@@ -120,19 +126,36 @@ class HomeViewModel(
         val defaultBudget = state.budgets.sumOf { it.monthlyAmount }.let { if (it == 0) 100000L else it.toLong() }
         
         val currentGoal = state.goalSetting
+        val currentAssetsForGoal = if (currentGoal?.useVirtualBalance == true) virtualBalance else currentAssets
         val goalMonthlyBudget = if ((currentGoal != null) && currentGoal.showResults && (currentGoal.targetAmount > 0)) {
             val remainingDays = ((currentGoal.targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
             val remainingMonths = (remainingDays / 30.0).coerceAtLeast(0.1)
             val totalExpectedIncome = (currentGoal.monthlyIncome * remainingMonths).toLong()
-            val totalSpendable = (virtualBalance + totalExpectedIncome - currentGoal.targetAmount).coerceAtLeast(0L)
+            val totalSpendable = (currentAssetsForGoal + totalExpectedIncome - currentGoal.targetAmount).coerceAtLeast(0L)
             if (remainingMonths > 0) (totalSpendable / remainingMonths).toLong() else 0L
         } else null
         val monthlyBudget = goalMonthlyBudget ?: defaultBudget
 
         val hasGoal = currentGoal != null && currentGoal.targetAmount > 0 && currentGoal.showResults
-        val goalProgressRatio = if (hasGoal) (virtualBalance.toFloat() / currentGoal.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
+        val goalProgressRatio = if (hasGoal) (currentAssetsForGoal.toFloat() / currentGoal!!.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
 
         val latestExpense = state.transactions.asSequence().filter { it.isExpense && it.category != "貸付" }.maxByOrNull { it.date }
+
+        if (!force && _homeAiText.value.isNotEmpty() &&
+            latestExpense?.id == lastHomeTriggerExpenseId &&
+            latestExpense?.amount == lastHomeTriggerExpenseAmount &&
+            latestExpense?.name == lastHomeTriggerExpenseName &&
+            spentThisMonth == lastHomeTriggerSpentThisMonth &&
+            virtualBalance.toInt() == lastHomeTriggerVirtualBalance) {
+            return
+        }
+
+        lastHomeTriggerExpenseId = latestExpense?.id
+        lastHomeTriggerExpenseAmount = latestExpense?.amount
+        lastHomeTriggerExpenseName = latestExpense?.name
+        lastHomeTriggerSpentThisMonth = spentThisMonth
+        lastHomeTriggerVirtualBalance = virtualBalance.toInt()
+
         val hasData = state.transactions.isNotEmpty() || state.assets.any { it.amount != 0 }
 
         val prompt = buildString {
@@ -145,18 +168,15 @@ class HomeViewModel(
             } else {
                 appendLine("現在の資産状況を踏まえ、将来への不安を煽るような、あるいは現在の緩みを指摘する鋭いアドバイスを1つだけ返してください。")
             }
-            appendLine("【出力構成：必ず以下の3文構成で出力してください】")
-            appendLine("1. 現状への皮肉な共感（例：ビュッフェ、楽しめたようで何よりです。）")
-            appendLine("2. データに基づく鋭い分析と煽り（例：残高は56万円もありますが、その余裕に甘んじて浪費を続ければ、あっという間に底を突くでしょう。）")
-            appendLine("3. 突き放すような純粋な煽り（例：今のあなたに、それを高いと感じる良心は残っていますか？）")
+            appendLine("【出力構成：2文で簡潔に出力してください】")
+            appendLine("・現状への皮肉と、データに基づく鋭い煽りを凝縮してください。")
             appendLine("【出力ルール】")
             appendLine("・未来の自制（「明日からは我慢しましょう」等）は一切促さないでください。ただただ現状を皮肉り、突き放してください。")
-            appendLine("・必ず「3つの文章」で構成してください。1文にまとめず、句点（。）で区切ってください。")
+            appendLine("・必ず2文（句点2つ）で構成してください。")
             appendLine("・改行は一切行わず、すべての文章を繋げて1つの段落として出力してください。")
-            appendLine("・合計100文字以内で構成してください。")
+            appendLine("・合計65文字程度で構成してください。")
             appendLine("・丁寧な言葉遣い（です・ます調）を維持しつつ、最大限に「煽って」ください。")
-            appendLine("【禁止事項】自己紹介、挨拶、タメ口、精神論、構成見出しの出力、改行の挿入、未来の自制を促す表現")
-            appendLine("【禁止事項】自己紹介、挨拶、タメ口、精神論、長文、複数の指摘")
+            appendLine("【禁止事項】自己紹介、挨拶、タメ口、精神論、構成見出しの出力、改行の挿入、未来の自制を促す表現、長文")
             appendLine("丁寧な言葉遣い（です・ます調）を維持しつつ、最大限に「煽って」ください。")
             
             if (hasData) {
@@ -196,10 +216,12 @@ class HomeViewModel(
         val remainingDays = ((currentGoal.targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
         val remainingMonths = (remainingDays / 30.0).coerceAtLeast(0.1)
         val totalExpectedIncome = (currentGoal.monthlyIncome * remainingMonths).toLong()
-        val totalSpendable = (virtualBalance + totalExpectedIncome - currentGoal.targetAmount).coerceAtLeast(0L)
+        
+        val currentAssetsForGoal = if (currentGoal.useVirtualBalance) virtualBalance else currentAssets
+        val totalSpendable = (currentAssetsForGoal + totalExpectedIncome - currentGoal.targetAmount).coerceAtLeast(0L)
         val monthlyBudget = if (remainingMonths > 0) (totalSpendable / remainingMonths).toLong() else 0L
 
-        val progressRatio = (virtualBalance.toFloat() / currentGoal.targetAmount.toFloat()).coerceIn(0f, 1.2f)
+        val progressRatio = (currentAssetsForGoal.toFloat() / currentGoal.targetAmount.toFloat()).coerceIn(0f, 1.2f)
         val progressPercent = (progressRatio * 100).toInt()
 
         val totalGoalDays = ((currentGoal.targetDateMillis - currentGoal.startDateMillis) / (1000 * 60 * 60 * 24)).coerceAtLeast(1L)
@@ -223,9 +245,10 @@ class HomeViewModel(
             appendLine()
             appendLine("目標: ${currentGoal.title}")
             appendLine("目標金額: ¥${String.format(Locale.JAPAN, "%,d", currentGoal.targetAmount)}")
-            appendLine("自由に使える残高: ¥${String.format(Locale.JAPAN, "%,d", virtualBalance)}（達成率$progressPercent%）")
+            appendLine("現在の資産（計算用）: ¥${String.format(Locale.JAPAN, "%,d", currentAssetsForGoal)}（達成率$progressPercent%）")
             appendLine("期限まで: $remainingDays 日（期間経過率$timeProgressPercent%）")
             appendLine("今後の月予算目安: ¥${String.format(Locale.JAPAN, "%,d", monthlyBudget)}")
+            appendLine("計算ベース: ${if (currentGoal.useVirtualBalance) "自由に使える残高" else "実資産"}")
             
             if (progressPercent < timeProgressPercent) {
                 appendLine("状況: 貯金のペースが期間経過に対して遅れ気味です。")

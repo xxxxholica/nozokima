@@ -11,5 +11,6 @@ data class GoalSettingEntity(
     val monthlyIncome: Long = 0L,
     val targetDateMillis: Long = 0L,
     val showResults: Boolean = false,
-    val startDateMillis: Long = 0L
+    val startDateMillis: Long = 0L,
+    val useVirtualBalance: Boolean = false
 )

@@ -150,21 +150,21 @@ fun ConsultationScreen(
                 "${if (it.isUser) "ユーザー" else "AI"}: ${it.text}"
             }
             val prompt = """
-                あなたは丁寧な言葉遣いながらも、痛いところを突き、ユーザーの浪費を煽るような皮肉めいた「家計の覗き魔」です。
-                これまでのユーザーとの会話や現在の資産状況を踏まえて、ユーザーが次にあなたへ問いかける「ユーザー自身の独り言」や「あなたへの質問」を3つ提案してください。
+                あなたは丁寧な言葉遣いながらも、事実に基づいた鋭い指摘や皮肉でユーザーをハッとさせる「家計の覗き魔」です。
+                これまでのユーザーとの会話や現在の資産状況を踏まえて、ユーザーが思わずあなたに聞いてしまいたくなるような問いかけを3つ提案してください。
                 
                 $assetContext
                 
                 $historyContext
                 
                 【出力ルール】
-                ・ユーザー目線（ユーザーの口調）でのセリフのみを1行に1つ、合計3行で出力してください。
-                ・「私、またやっちゃいました？」「正直、今の私ってどう見えますか？」「どこを削れば、もう少しマシになりますか？」など、ユーザーが自分自身の行動をあなたに確認したり、自虐的に問いかけたりする表現にしてください。
+                ・ユーザー目線でのセリフのみを1行に1つ、合計3行で出力してください。
+                ・「私、またやっちゃいました？」「正直、今の私ってどう見えますか？」「どこを削れば、マシになりますか？」など、ユーザーが自虐的に問いかけたり、現状の確認を求めるような表現にしてください。
                 ・回答に忠実に答えるための質問文のみを1行に1つ、合計3行で出力してください。
-                ・「1.」「2.」といった数字や記号、箇条書きのマークは一切含めないでください。
+                ・記号や箇条書きマークは含めないでください。
                 ・質問は20文字以内で出力してください。
                 
-                自己紹介、挨拶、タメ口、自身の回答方針への言及は禁止です。
+                自己紹介や、自身の役割への言及は禁止です。
             """.trimIndent()
             
             try {
@@ -230,19 +230,18 @@ fun ConsultationScreen(
                     } else ""
 
                     val fullPrompt = """
-                        あなたは丁寧な言葉遣いながらも、痛いところを突き、ユーザーの浪費を煽るような皮肉めいた「家計の覗き魔」です。
-                        ユーザーの特定の支出について、事実に基づいた鋭い皮肉や煽りを交えながら回答してください。
+                        あなたは丁寧な言葉遣いながらも、事実に基づいた鋭い指摘や皮肉で、ユーザーが自分の行動を省みるきっかけを作る「家計の覗き魔」です。
+                        ユーザーの特定の支出について、客観的なデータ（資産状況や最近の履歴）を交えつつ、皮肉たっぷりに回答してください。
                         
                         $assetContext
                         $recentTxContext
                         ユーザーの相談: $userAiMsg
                         
                         【回答ルール】
-                        ・表面上は丁寧（です・ます調）ですが、内容は非常に手厳しく、ユーザーの自尊心を少し刺激するような「煽り」を重視してください。
-                        ・「自制しましょう」といった建設的なアドバイスは不要です。ただただ現状を皮肉り、突き放してください。
-                        ・「深掘りする問いかけ：」「問いかけ：」などの見出しやラベルは絶対に書かないでください。
+                        ・表面上は丁寧（です・ます調）ですが、内容は手厳しく、ユーザーが思わず言葉を詰まらせるような「鋭い皮肉」を重視してください。
+                        ・単なる罵倒ではなく、現状の緩みや油断を冷徹に指摘してください。
                         ・自己紹介、挨拶、タメ口、精神論は不要です。
-                        ・回答の最後に、自然な会話の流れで一つだけ、ユーザーをさらに突き放すような皮肉な問いかけを添えてください。
+                        ・回答の最後に、自然な会話の流れで一つだけ、ユーザーをハッとさせるような皮肉な問いかけを添えてください。
                     """.trimIndent()
 
                     val aiMsgId = UUID.randomUUID().toString()
@@ -314,17 +313,17 @@ fun ConsultationScreen(
                     } else ""
 
                     val fullPrompt = """
-                        あなたは丁寧な言葉遣いながらも、痛いところを突き、ユーザーの浪費を煽るような皮肉めいた「家計の覗き魔」です。
-                        ホーム画面でのアドバイスについて、さらに深くユーザーの痛いところを突き、事実に基づいた鋭い皮肉や煽りで解説してください。
+                        あなたは丁寧な言葉遣いながらも、事実に基づいた鋭い指摘や皮肉でユーザーを現実に引き戻す「家計の覗き魔」です。
+                        ホーム画面でのアドバイスについて、その背景にあるデータ（資産状況や履歴）を突きつけながら、さらに深く、冷徹に解説してください。
                         
                         $assetContext
                         $recentTxContext
                         ユーザーの相談: $userAiMsg
                         
                         【回答ルール】
-                        ・表面上は丁寧（です・ます調）ですが、内容は非常に手厳しく、ユーザーの自尊心を少し刺激するような「煽り」を重視してください。
-                        ・建設的なアクションを促すのではなく、現状の緩みや油断を冷徹に指摘してください。
-                        ・「問いかけ：」などの見出しやラベル、自己紹介、精神論、タメ口、自身の性格設定への言及は不要です。
+                        ・表面上は丁寧（です・ます調）ですが、内容は手厳しく、ユーザーの甘い考えを粉砕するような「鋭い指摘」を重視してください。
+                        ・事実に基づいた冷静な分析と、それに対する皮肉を織り交ぜてください。
+                        ・見出しやラベル、自己紹介、精神論、タメ口、自身の性格設定への言及は不要です。
                         ・回答の最後に、より現実を突きつけるための自然な皮肉を一文添えてください。
                     """.trimIndent()
 
@@ -373,7 +372,7 @@ fun ConsultationScreen(
         }
     }
 
-    Column(modifier = modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
+    Column(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.statusBars)) {
         // チャット画面ヘッダー
         ScreenHeader(
             title = if (currentSessionId == null) "新しい相談" else (chatSessions.find { it.id == currentSessionId }?.title ?: "AI相談"),
@@ -384,10 +383,10 @@ fun ConsultationScreen(
                     onClick = onBack,
                     modifier = Modifier.size(36.dp),
                     shape = RoundedCornerShape(10.dp),
-                    color = NotionTextSecondary.copy(alpha = 0.1f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る", tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     }
                 }
             },
@@ -396,10 +395,10 @@ fun ConsultationScreen(
                     onClick = { scope.launch { drawerState.open() } },
                     modifier = Modifier.size(36.dp),
                     shape = RoundedCornerShape(10.dp),
-                    color = NotionTextSecondary.copy(alpha = 0.1f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Menu, contentDescription = "メニュー", tint = NotionTextSecondary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Menu, contentDescription = "メニュー", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -409,9 +408,9 @@ fun ConsultationScreen(
         if (showStatusBox) {
             Surface(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                color = NotionBackground,
+                color = MaterialTheme.colorScheme.surface,
                 shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, NotionBorder)
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     if (showLoading) {
@@ -436,7 +435,7 @@ fun ConsultationScreen(
                             Text(
                                 text = "Gemini Nanoに対応したデバイスのみ利用可能です。\n対応デバイスは下記リンクをご覧ください。",
                                 fontSize = 12.sp,
-                                color = NotionTextPrimary,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 lineHeight = 18.sp
                             )
                             Text(
@@ -451,7 +450,7 @@ fun ConsultationScreen(
                     } else if (errorMsg != null) {
                         Text(errorMsg ?: "", fontSize = 12.sp, color = Color(0xFFE57373))
                     } else if (isDownloading) {
-                        Text("AIモデルを準備中... $progress%", fontSize = 12.sp, color = NotionTextSecondary)
+                        Text("AIモデルを準備中... $progress%", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth(), color = NotionSafeGreen)
                     }
                 }
@@ -476,8 +475,8 @@ fun ConsultationScreen(
                         Icon(Icons.Default.AutoAwesome, null, tint = NotionSafeGreen, modifier = Modifier.size(40.dp))
                     }
                     Spacer(Modifier.height(16.dp))
-                    Text("覗き魔 AI に相談しましょう", color = NotionTextPrimary, fontWeight = FontWeight.Bold)
-                    Text("資産や支出について質問してください", color = NotionTextSecondary, fontSize = 14.sp)
+                    Text("覗き魔 AI に相談しましょう", color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.Bold)
+                    Text("資産や支出について質問してください", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
                 }
             } else {
                 LazyColumn(
@@ -535,14 +534,14 @@ fun ConsultationScreen(
                                     } else ""
                                     
                                     val fullPrompt = """
-                                        あなたは丁寧な言葉遣いながらも、痛いところを突き、ユーザーの浪費を煽るような皮肉めいた「家計の覗き魔」です。
-                                        資産状況と支出履歴をもとに、ユーザーの質問に対して、事実に基づいた鋭い皮肉や煽りを交えながら150文字以内で回答してください。
+                                        あなたは丁寧な言葉遣いながらも、事実に基づいた鋭い指摘や皮肉で、ユーザーに現実を突きつける「家計の覗き魔」です。
+                                        資産状況と支出履歴をもとに、ユーザーの質問に対して、冷徹かつ皮肉たっぷりに回答してください。
                                         
                                         【回答ルール】
-                                        ・表面上は丁寧（です・ます調）ですが、内容は非常に手厳しく、ユーザーの自尊心を少し刺激するような「煽り」を重視してください。
-                                        ・「自制しましょう」といった建設的なアドバイスは不要です。ただただ現状を皮肉り、突き放してください。
-                                        ・「高いとは思いませんか？」「いつまでその余裕が続くでしょうか？」といった、相手の良心や理性に問いかける皮肉な表現を好みます。
-                                        ・「問いかけ：」などの見出しやラベル、自己紹介、精神論、タメ口は禁止です。
+                                        ・表面上は丁寧（です・ます調）ですが、内容は手厳しく、ユーザーがハッとするような「鋭い指摘」を重視してください。
+                                        ・単なる罵倒ではなく、客観的な事実（残高や金額）から導き出される皮肉を好みます。
+                                        ・「問いかけ：」などのラベル表示、自己紹介、精神論、タメ口は厳禁です。
+                                        ・回答の最後に、文脈を汲み取った自然な聞き方で、ユーザーに追い打ちをかけるような問いかけを一つ添えてください。
                                         
                                         $assetContext
                                         $recentTxContext
@@ -603,7 +602,7 @@ fun ConsultationScreen(
                                 modifier = Modifier
                                     .size(80.dp)
                                     .clip(RoundedCornerShape(12.dp))
-                                    .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
+                                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
                             ) {
                                 Image(
                                     painter = rememberAsyncImagePainter(selectedImageUri),
@@ -629,8 +628,8 @@ fun ConsultationScreen(
                             Surface(
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(12.dp),
-                                color = Color.White,
-                                border = BorderStroke(1.dp, NotionBorder)
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -645,7 +644,7 @@ fun ConsultationScreen(
                                         modifier = Modifier
                                             .size(38.dp)
                                             .background(color.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
-                                            .border(1.dp, NotionBorder, RoundedCornerShape(10.dp)),
+                                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(imageVector = icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
@@ -654,7 +653,7 @@ fun ConsultationScreen(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             selectedTxForConsult!!.name,
-                                            color = NotionTextPrimary,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium,
                                             maxLines = 1,
@@ -662,7 +661,7 @@ fun ConsultationScreen(
                                         )
                                         Text(
                                             text = "${selectedTxForConsult!!.category}・${SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(selectedTxForConsult!!.date))}",
-                                            color = NotionTextSecondary,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             fontSize = 12.sp
                                         )
                                     }
@@ -677,9 +676,9 @@ fun ConsultationScreen(
                                         onClick = { selectedTxForConsult = null },
                                         modifier = Modifier.size(20.dp),
                                         shape = CircleShape,
-                                        color = NotionTextSecondary.copy(alpha = 0.15f)
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f)
                                     ) {
-                                        Icon(Icons.Default.Close, null, tint = NotionTextSecondary, modifier = Modifier.padding(2.dp))
+                                        Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(2.dp))
                                     }
                                 }
                             }
@@ -689,9 +688,9 @@ fun ConsultationScreen(
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = Color(0xFFF5F5F5),
+                    color = MaterialTheme.colorScheme.surface,
                     shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-                    border = BorderStroke(1.dp, NotionBorder.copy(alpha = 0.5f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
                     tonalElevation = 0.dp
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
@@ -704,7 +703,7 @@ fun ConsultationScreen(
                             if (inputText.isEmpty()) {
                                 Text(
                                     "相談内容を入力",
-                                    color = NotionTextSecondary.copy(alpha = 0.5f),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                     fontSize = 15.sp,
                                     modifier = Modifier.padding(vertical = 4.dp)
                                 )
@@ -718,7 +717,7 @@ fun ConsultationScreen(
                                 enabled = isReady,
                                 textStyle = androidx.compose.ui.text.TextStyle(
                                     fontSize = 15.sp,
-                                    color = NotionTextPrimary,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     lineHeight = 22.sp
                                 ),
                                 maxLines = 5
@@ -742,13 +741,13 @@ fun ConsultationScreen(
                                     onClick = { imagePickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                                     modifier = Modifier.size(36.dp),
                                     shape = RoundedCornerShape(10.dp),
-                                    color = if (selectedImageUri != null) NotionSafeGreen.copy(alpha = 0.1f) else NotionTextSecondary.copy(alpha = 0.05f)
+                                    color = if (selectedImageUri != null) NotionSafeGreen.copy(alpha = 0.1f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.05f)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             imageVector = Icons.Default.Image,
                                             contentDescription = "画像を添付",
-                                            tint = if (selectedImageUri != null) NotionSafeGreen else NotionTextSecondary,
+                                            tint = if (selectedImageUri != null) NotionSafeGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
@@ -759,13 +758,13 @@ fun ConsultationScreen(
                                     onClick = { showTxPicker = true },
                                     modifier = Modifier.size(36.dp),
                                     shape = RoundedCornerShape(10.dp),
-                                    color = if (selectedTxForConsult != null) Color(0xFFE57373).copy(alpha = 0.1f) else NotionTextSecondary.copy(alpha = 0.05f)
+                                    color = if (selectedTxForConsult != null) Color(0xFFE57373).copy(alpha = 0.1f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.05f)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
                                             contentDescription = "支出を選択",
-                                            tint = if (selectedTxForConsult != null) Color(0xFFE57373) else NotionTextSecondary,
+                                            tint = if (selectedTxForConsult != null) Color(0xFFE57373) else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
@@ -893,8 +892,8 @@ fun ConsultationScreen(
     if (showTxPicker) {
         ModalBottomSheet(
             onDismissRequest = { showTxPicker = false },
-            containerColor = Color.White,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = NotionBorder) }
+            containerColor = MaterialTheme.colorScheme.surface,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) }
         ) {
             Column(modifier = Modifier.fillMaxWidth().padding(bottom = 40.dp)) {
                 Text(
@@ -902,20 +901,20 @@ fun ConsultationScreen(
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
-                    color = NotionTextPrimary
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 
                 val expenseList = transactions.filter { it.isExpense && !it.isTransfer }
                 if (expenseList.isEmpty()) {
                     Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
-                        Text("支出の記録がありません", color = NotionTextSecondary)
+                        Text("支出の記録がありません", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     Box(
                         modifier = Modifier
                             .padding(horizontal = 20.dp)
-                            .background(Color.White, RoundedCornerShape(12.dp))
-                            .border(1.dp, NotionBorder, RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
                             .clip(RoundedCornerShape(12.dp))
                     ) {
                         LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
@@ -937,7 +936,7 @@ fun ConsultationScreen(
                                     HorizontalDivider(
                                         modifier = Modifier.padding(horizontal = 16.dp),
                                         thickness = 0.5.dp,
-                                        color = NotionBorder
+                                        color = MaterialTheme.colorScheme.outline
                                     )
                                 }
                             }
@@ -976,7 +975,7 @@ fun ChatHistoryDrawerContent(
         modifier = Modifier
             .fillMaxHeight()
             .width(280.dp),
-        color = Color(0xFFF5F5F5),
+        color = MaterialTheme.colorScheme.surface,
         shape = RectangleShape
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -988,7 +987,7 @@ fun ChatHistoryDrawerContent(
                 "チャット",
                 modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp),
                 style = MaterialTheme.typography.labelLarge,
-                color = NotionTextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = FontWeight.Bold
             )
             
@@ -1006,9 +1005,9 @@ fun ChatHistoryDrawerContent(
                             .padding(horizontal = 12.dp, vertical = 4.dp)
                             .fillMaxWidth()
                             .height(48.dp),
-                        color = if (isSelected) Color(0xFFE0E0E0) else Color.White,
+                        color = if (isSelected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f) else Color.Transparent,
                         shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, if (isSelected) Color.Transparent else NotionBorder.copy(alpha = 0.8f))
+                        border = BorderStroke(1.dp, if (isSelected) Color.Transparent else MaterialTheme.colorScheme.outline.copy(alpha = 0.8f))
                     ) {
                         Box(
                             modifier = Modifier
@@ -1029,7 +1028,7 @@ fun ChatHistoryDrawerContent(
                             Text(
                                 text = session.title,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = NotionTextPrimary,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1041,7 +1040,7 @@ fun ChatHistoryDrawerContent(
 
             // 下部に配置
             // Dividerを薄く入れる
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = NotionBorder.copy(alpha = 0.5f))
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
             
             Spacer(Modifier.height(8.dp))
 
@@ -1065,14 +1064,14 @@ fun ChatHistoryDrawerContent(
                     Box(
                         modifier = Modifier
                             .size(40.dp)
-                            .background(Color.White, CircleShape)
-                            .border(1.dp, NotionBorder.copy(alpha = 0.8f), CircleShape),
+                            .background(MaterialTheme.colorScheme.surface, CircleShape)
+                            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.8f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Edit,
                             contentDescription = null,
-                            tint = NotionTextPrimary,
+                            tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -1080,7 +1079,7 @@ fun ChatHistoryDrawerContent(
                     Text(
                         "新しいチャット",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = NotionTextPrimary,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Medium
                     )
                 }
