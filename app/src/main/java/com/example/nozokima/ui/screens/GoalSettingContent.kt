@@ -11,9 +11,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.verticalScroll
+import com.example.nozokima.ui.components.ChatBubble
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
@@ -22,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -36,6 +42,7 @@ import com.example.nozokima.data.manager.*
 import com.example.nozokima.ui.components.CustomKeypad
 import com.example.nozokima.ui.components.ScreenHeader
 import com.example.nozokima.util.evaluateExpression
+import com.example.nozokima.util.formatAmountWithCommas
 import com.google.mlkit.genai.common.FeatureStatus
 import kotlinx.coroutines.launch
 import ui.theme.*
@@ -52,6 +59,13 @@ fun GoalSettingContent(
     aiIsChecking: Boolean,
     aiIsInitialized: Boolean = false,
     goalAiText: String = "",
+    goalProposal: com.example.nozokima.ui.viewmodel.GoalProposal? = null,
+    goalPlanningMessages: List<com.example.nozokima.model.ChatMessage> = emptyList(),
+    planningStep: Int = 0,
+    onStartPlanning: () -> Unit = {},
+    onUpdatePlanningValue: (Int, String) -> Unit = { _, _ -> },
+    onPlanGoal: (String) -> Unit = {},
+    onClearProposal: () -> Unit = {},
     onRefreshAi: () -> Unit = {},
     onAiAdviceClick: (String) -> Unit = {},
     isKeypadVisible: Boolean = false,
@@ -62,7 +76,6 @@ fun GoalSettingContent(
     val lendings by dao.getAllLendings().collectAsState(initial = emptyList())
     val goalSetting by dao.getGoalSetting().collectAsState(initial = null)
     val scope = rememberCoroutineScope()
-    val focusManager = LocalFocusManager.current
 
     val defaultDateMillis = remember { Calendar.getInstance().apply { add(Calendar.MONTH, 6) }.timeInMillis }
 
@@ -140,6 +153,7 @@ fun GoalSettingContent(
 
     val goalAchieved = currentAssetsForCalc >= targetAmount && targetAmount > 0L && showResults
     val isAmountTooLow = targetAmount > 0L && targetAmount <= currentAssetsForCalc
+    val isPlanningMode = !showResults && !isSimulationView && targetAmount == 0L && titleText.isEmpty()
     val currentStep = when {
         goalAchieved -> 3
         showResults -> 2
@@ -147,6 +161,16 @@ fun GoalSettingContent(
         else -> 0
     }
     val canStart = targetAmount > actualTotalAssets && monthlyIncomeText.isNotEmpty()
+
+    var isLocalConsultVisible by remember { mutableStateOf(false) }
+    var localConsultText by remember { mutableStateOf("") }
+
+    // プランニング開始のトリガー
+    LaunchedEffect(isPlanningMode) {
+        if (isPlanningMode) {
+            onStartPlanning()
+        }
+    }
 
     // 自動トリガー
     LaunchedEffect(aiIsReady, currentStep) {
@@ -201,88 +225,100 @@ fun GoalSettingContent(
                     },
                     label = "GoalContentTransition"
                 ) { targetStep ->
-                    Column(
-                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-                            Spacer(Modifier.height(12.dp))
-                            when (targetStep) {
-                                3 -> {
-                                    GoalAchievedView(
-                                        actualTotalAssets = currentAssetsForCalc,
-                                        targetAmount = targetAmount,
-                                        totalSpendable = totalSpendable,
-                                        monthlyBudget = monthlyBudget,
-                                        startDateMillis = startDateMillis,
-                                        targetDateMillis = targetDateMillis,
-                                        remainingDays = remainingDays,
-                                        aiStatus = aiStatus,
-                                        aiIsGenerating = aiIsGenerating,
-                                        showAiProgress = showAiProgress,
-                                        aiStatusLabel = aiStatusLabel,
-                                        goalAiText = goalAiText,
-                                        onRefreshAi = onRefreshAi,
-                                        onAiAdviceClick = onAiAdviceClick,
-                                        isAiWaiting = isAiWaiting
-                                    )
-                                }
-                                2 -> {
-                                    GoalProgressView(
-                                        actualTotalAssets = currentAssetsForCalc,
-                                        targetAmount = targetAmount,
-                                        totalSpendable = totalSpendable,
-                                        monthlyBudget = monthlyBudget,
-                                        startDateMillis = startDateMillis,
-                                        targetDateMillis = targetDateMillis,
-                                        remainingDays = remainingDays,
-                                        aiStatus = aiStatus,
-                                        aiIsGenerating = aiIsGenerating,
-                                        showAiProgress = showAiProgress,
-                                        aiStatusLabel = aiStatusLabel,
-                                        goalAiText = goalAiText,
-                                        onRefreshAi = onRefreshAi,
-                                        onAiAdviceClick = onAiAdviceClick,
-                                        isAiWaiting = isAiWaiting
-                                    )
-                                }
-                                1 -> {
-                                    GoalSimulationView(
-                                        actualTotalAssets = currentAssetsForCalc,
-                                        totalSpendable = totalSpendable,
-                                        monthlyBudget = monthlyBudget
-                                    )
-                                }
-                                else -> {
-                                    GoalSetupView(
-                                        titleText = titleText,
-                                        onTitleChange = { titleText = it; saveGoal() },
-                                        targetAmountText = targetAmountText,
-                                        onAmountClick = {
-                                            focusManager.clearFocus()
-                                            goalKeypadTarget = "amount"
-                                            onKeypadVisibilityChange(true)
-                                        },
-                                        monthlyIncomeText = monthlyIncomeText,
-                                        onIncomeClick = {
-                                            focusManager.clearFocus()
-                                            goalKeypadTarget = "income"
-                                            onKeypadVisibilityChange(true)
-                                        },
-                                        targetDateMillis = targetDateMillis,
-                                        onDateClick = {
-                                            focusManager.clearFocus()
-                                            showDatePicker = true
-                                        },
-                                        dateFormatter = dateFormatter,
-                                        isAmountTooLow = isAmountTooLow,
-                                        useVirtualBalance = useVirtualBalance,
-                                        onUseVirtualBalanceChange = { useVirtualBalance = it; saveGoal() }
-                                    )
-                                }
+                    // プランニングモードの場合は独自スクロール（LazyColumn）を持つので verticalScroll をかけない
+                    if (targetStep == 0 && isPlanningMode) {
+                        GoalPlanningView(
+                            aiStatus = aiStatus,
+                            aiIsReady = aiIsReady,
+                            aiIsGenerating = aiIsGenerating,
+                            goalProposal = goalProposal,
+                            goalPlanningMessages = goalPlanningMessages,
+                            planningStep = planningStep,
+                            onUpdatePlanningValue = onUpdatePlanningValue,
+                            onPlanGoal = onPlanGoal,
+                            onApplyProposal = { proposal ->
+                                titleText = proposal.title
+                                targetAmountText = proposal.targetAmount.toString()
+                                targetDateMillis = proposal.targetDateMillis
+                                saveGoal()
+                                onClearProposal()
                             }
-                            
-                            Spacer(Modifier.height(24.dp))
+                        )
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                                Spacer(Modifier.height(12.dp))
+                                when (targetStep) {
+                                    3 -> {
+                                        GoalAchievedView(
+                                            actualTotalAssets = currentAssetsForCalc,
+                                            targetAmount = targetAmount,
+                                            totalSpendable = totalSpendable,
+                                            monthlyBudget = monthlyBudget,
+                                            startDateMillis = startDateMillis,
+                                            targetDateMillis = targetDateMillis,
+                                            remainingDays = remainingDays,
+                                            aiStatus = aiStatus,
+                                            aiIsGenerating = aiIsGenerating,
+                                            showAiProgress = showAiProgress,
+                                            aiStatusLabel = aiStatusLabel,
+                                            goalAiText = goalAiText,
+                                            onRefreshAi = onRefreshAi,
+                                            onAiAdviceClick = {
+                                                localConsultText = it
+                                                isLocalConsultVisible = true
+                                            },
+                                            isAiWaiting = isAiWaiting
+                                        )
+                                    }
+                                    2 -> {
+                                        GoalProgressView(
+                                            actualTotalAssets = currentAssetsForCalc,
+                                            targetAmount = targetAmount,
+                                            totalSpendable = totalSpendable,
+                                            monthlyBudget = monthlyBudget,
+                                            startDateMillis = startDateMillis,
+                                            targetDateMillis = targetDateMillis,
+                                            remainingDays = remainingDays,
+                                            aiStatus = aiStatus,
+                                            aiIsGenerating = aiIsGenerating,
+                                            showAiProgress = showAiProgress,
+                                            aiStatusLabel = aiStatusLabel,
+                                            goalAiText = goalAiText,
+                                            onRefreshAi = onRefreshAi,
+                                            onAiAdviceClick = {
+                                                localConsultText = it
+                                                isLocalConsultVisible = true
+                                            },
+                                            isAiWaiting = isAiWaiting
+                                        )
+                                    }
+                                    1 -> {
+                                        GoalSimulationView(
+                                            actualTotalAssets = currentAssetsForCalc,
+                                            totalSpendable = totalSpendable,
+                                            monthlyBudget = monthlyBudget
+                                        )
+                                    }
+                                    else -> {
+                                        GoalSetupView(
+                                            titleText = titleText,
+                                            targetAmountText = targetAmountText,
+                                            monthlyIncomeText = monthlyIncomeText,
+                                            targetDateMillis = targetDateMillis,
+                                            dateFormatter = dateFormatter,
+                                            isAmountTooLow = isAmountTooLow,
+                                            useVirtualBalance = useVirtualBalance,
+                                            onUseVirtualBalanceChange = { useVirtualBalance = it; saveGoal() }
+                                        )
+                                    }
+                                }
+                                
+                                Spacer(Modifier.height(24.dp))
+                            }
                         }
                     }
                 }
@@ -363,18 +399,27 @@ fun GoalSettingContent(
                         }
                     }
                     else -> {
-                        Button(
-                            onClick = { isSimulationView = true },
-                            modifier = Modifier.fillMaxWidth().height(52.dp),
-                            enabled = canStart,
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen, disabledContainerColor = MaterialTheme.colorScheme.outline)
-                        ) {
-                            Text("試算する", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        if (!isPlanningMode) {
+                            Button(
+                                onClick = { isSimulationView = true },
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                enabled = canStart,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen, disabledContainerColor = MaterialTheme.colorScheme.outline)
+                            ) {
+                                Text("試算する", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
             }
+        }
+
+        if (isLocalConsultVisible) {
+            LocalConsultBottomSheet(
+                initialText = localConsultText,
+                onDismiss = { isLocalConsultVisible = false }
+            )
         }
 
         if (showDatePicker) {
@@ -511,16 +556,394 @@ fun GoalAchievedView(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GoalPlanningView(
+    aiStatus: Int,
+    aiIsReady: Boolean,
+    aiIsGenerating: Boolean,
+    goalProposal: com.example.nozokima.ui.viewmodel.GoalProposal?,
+    goalPlanningMessages: List<com.example.nozokima.model.ChatMessage>,
+    planningStep: Int,
+    onUpdatePlanningValue: (Int, String) -> Unit,
+    onPlanGoal: (String) -> Unit,
+    onApplyProposal: (com.example.nozokima.ui.viewmodel.GoalProposal) -> Unit
+) {
+    var wishText by remember { mutableStateOf("") }
+    var showRequestBox by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val listState = rememberLazyListState()
+
+    var showPlanningKeypad by remember { mutableStateOf(false) }
+    var planningKeypadTarget by remember { mutableStateOf("amount") } // "amount" or "income"
+    var tempAmountText by remember { mutableStateOf("") }
+    var tempIncomeText by remember { mutableStateOf("") }
+    var showPlanningDatePicker by remember { mutableStateOf(false) }
+    var tempDateMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(goalPlanningMessages.size) {
+        if (goalPlanningMessages.isNotEmpty()) {
+            listState.animateScrollToItem(goalPlanningMessages.size - 1)
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.weight(1f)) {
+            if (goalPlanningMessages.isEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("プランニングを開始しています...", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 40.dp)
+                ) {
+                    items(goalPlanningMessages) { msg ->
+                        ChatBubble(msg)
+                    }
+
+                    if (planningStep < 4) {
+                        item {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                QuestionnaireTile(
+                                    step = 0,
+                                    currentStep = planningStep,
+                                    question = "何のために貯金をしたいか教えてください。",
+                                    onConfirm = { onUpdatePlanningValue(0, it) }
+                                )
+                                QuestionnaireTile(
+                                    step = 1,
+                                    currentStep = planningStep,
+                                    question = "目標金額（何円貯めたいか）を教えてください。",
+                                    onConfirm = { onUpdatePlanningValue(1, it) },
+                                    isNumeric = true,
+                                    onNumericClick = { planningKeypadTarget = "amount"; showPlanningKeypad = true },
+                                    numericValue = tempAmountText
+                                )
+                                QuestionnaireTile(
+                                    step = 2,
+                                    currentStep = planningStep,
+                                    question = "いつまでに達成したいですか？",
+                                    onConfirm = { /* DatePicker handled */ },
+                                    isDate = true,
+                                    onDateClick = { showPlanningDatePicker = true },
+                                    dateValue = tempDateMillis
+                                )
+                                QuestionnaireTile(
+                                    step = 3,
+                                    currentStep = planningStep,
+                                    question = "平均月収の目安を教えてください。",
+                                    onConfirm = { onUpdatePlanningValue(3, it) },
+                                    isNumeric = true,
+                                    onNumericClick = { planningKeypadTarget = "income"; showPlanningKeypad = true },
+                                    numericValue = tempIncomeText
+                                )
+                            }
+                        }
+                    }
+
+                    if (goalProposal != null) {
+                        item {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, NotionSafeGreen.copy(alpha = 0.3f))
+                            ) {
+                                Column(modifier = Modifier.padding(20.dp)) {
+                                    Text("提案された最終プラン", fontWeight = FontWeight.Bold, color = NotionSafeGreen, fontSize = 15.sp)
+                                    Spacer(Modifier.height(16.dp))
+
+                                    PlanItem(Icons.Default.Flag, "目標", goalProposal.title)
+                                    PlanItem(Icons.Default.Star, "金額", "¥ ${String.format(Locale.JAPAN, "%,d", goalProposal.targetAmount)}")
+                                    PlanItem(Icons.Default.CalendarMonth, "達成日", SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN).format(Date(goalProposal.targetDateMillis)))
+
+                                    Spacer(Modifier.height(12.dp))
+                                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                                    Spacer(Modifier.height(12.dp))
+                                    Text(goalProposal.advice, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 20.sp)
+                                    Spacer(Modifier.height(20.dp))
+
+                                    if (!showRequestBox) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            OutlinedButton(
+                                                onClick = { showRequestBox = true },
+                                                modifier = Modifier.weight(1f).height(48.dp),
+                                                shape = RoundedCornerShape(12.dp),
+                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                            ) {
+                                                Text("修正する", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                            Button(
+                                                onClick = { onApplyProposal(goalProposal) },
+                                                modifier = Modifier.weight(1.5f).height(48.dp),
+                                                shape = RoundedCornerShape(12.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen)
+                                            ) {
+                                                Text("これで決定", fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    } else {
+                                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            OutlinedTextField(
+                                                value = wishText,
+                                                onValueChange = { wishText = it },
+                                                placeholder = { Text("修正したい内容を入力してください", fontSize = 14.sp) },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(12.dp),
+                                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NotionSafeGreen)
+                                            )
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                TextButton(onClick = { showRequestBox = false }) {
+                                                    Text("キャンセル", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                                Spacer(Modifier.weight(1f))
+                                                Button(
+                                                    onClick = {
+                                                        if (wishText.isNotBlank()) {
+                                                            onPlanGoal(wishText)
+                                                            wishText = ""
+                                                            showRequestBox = false
+                                                        }
+                                                    },
+                                                    enabled = wishText.isNotBlank() && aiIsReady && !aiIsGenerating,
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen)
+                                                ) {
+                                                    if (aiIsGenerating) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                                                    else Text("送信する")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showPlanningDatePicker) {
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = tempDateMillis)
+        DatePickerDialog(
+            onDismissRequest = { showPlanningDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    tempDateMillis = datePickerState.selectedDateMillis ?: tempDateMillis
+                    showPlanningDatePicker = false
+                    onUpdatePlanningValue(2, SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN).format(Date(tempDateMillis)))
+                }) { Text("OK", color = NotionSafeGreen) }
+            },
+            dismissButton = { TextButton(onClick = { showPlanningDatePicker = false }) { Text("キャンセル") } }
+        ) { DatePicker(state = datePickerState) }
+    }
+
+    if (showPlanningKeypad) {
+        ModalBottomSheet(
+            onDismissRequest = { showPlanningKeypad = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) },
+            scrimColor = Color.Transparent
+        ) {
+            CustomKeypad(
+                onNumberClick = { num -> if (planningKeypadTarget == "amount") tempAmountText += num else tempIncomeText += num },
+                onOperatorClick = { op -> if (planningKeypadTarget == "amount") tempAmountText += op else tempIncomeText += op },
+                onDeleteClick = { if (planningKeypadTarget == "amount") tempAmountText = tempAmountText.dropLast(1) else tempIncomeText = tempIncomeText.dropLast(1) },
+                onClearAllClick = { if (planningKeypadTarget == "amount") tempAmountText = "" else tempIncomeText = "" },
+                onConfirmClick = {
+                    if (planningKeypadTarget == "amount") {
+                        try { tempAmountText = evaluateExpression(tempAmountText).toString() } catch (_: Exception) {}
+                    } else {
+                        try { tempIncomeText = evaluateExpression(tempIncomeText).toString() } catch (_: Exception) {}
+                    }
+                },
+                onSaveClick = {
+                    if (planningKeypadTarget == "amount") {
+                        try { tempAmountText = evaluateExpression(tempAmountText).toString() } catch (_: Exception) {}
+                        onUpdatePlanningValue(1, tempAmountText)
+                    } else {
+                        try { tempIncomeText = evaluateExpression(tempIncomeText).toString() } catch (_: Exception) {}
+                        onUpdatePlanningValue(3, tempIncomeText)
+                    }
+                    showPlanningKeypad = false
+                },
+                onCloseClick = { showPlanningKeypad = false },
+                isSaveEnabled = true,
+                actionColor = NotionSafeGreen
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LocalConsultBottomSheet(
+    initialText: String,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 40.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.AutoAwesome, null, tint = NotionSafeGreen, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("AI相談", color = NotionSafeGreen, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(16.dp))
+            
+            Surface(
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    text = initialText,
+                    modifier = Modifier.padding(16.dp),
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            
+            Spacer(Modifier.height(24.dp))
+            Text(
+                "※現在はプランニングの深掘り機能を開発中です。具体的な対策は『AI相談』画面からもご確認いただけます。",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 18.sp
+            )
+            
+            Spacer(Modifier.height(24.dp))
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen)
+            ) {
+                Text("閉じる")
+            }
+        }
+    }
+}
+
+@Composable
+fun QuestionnaireTile(
+    step: Int,
+    currentStep: Int,
+    question: String,
+    onConfirm: (String) -> Unit,
+    isNumeric: Boolean = false,
+    onNumericClick: () -> Unit = {},
+    numericValue: String = "",
+    isDate: Boolean = false,
+    onDateClick: () -> Unit = {},
+    dateValue: Long = 0L
+) {
+    val isActive = step == currentStep
+    val isDone = step < currentStep
+    val alpha = if (isActive) 1f else 0.4f
+
+    Surface(
+        modifier = Modifier.fillMaxWidth().alpha(alpha),
+        shape = RoundedCornerShape(20.dp),
+        color = if (isActive) NotionSafeGreen.copy(alpha = 0.05f) else MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, if (isActive) NotionSafeGreen.copy(alpha = 0.2f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(24.dp).background(if (isDone) NotionSafeGreen else NotionSafeGreen.copy(alpha = 0.1f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isDone) Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                    else Text("${step + 1}", color = NotionSafeGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(question, color = if (isActive) NotionSafeGreen else MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+
+            if (isActive) {
+                when {
+                    isNumeric -> {
+                        Button(
+                            onClick = onNumericClick,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen)
+                        ) {
+                            Text(if (numericValue.isEmpty()) "入力を開始" else "¥ ${formatAmountWithCommas(numericValue)}")
+                        }
+                    }
+                    isDate -> {
+                        Button(
+                            onClick = onDateClick,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = NotionSafeGreen)
+                        ) {
+                            Text(SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN).format(Date(dateValue)))
+                        }
+                    }
+                    else -> {
+                        var text by remember { mutableStateOf("") }
+                        OutlinedTextField(
+                            value = text,
+                            onValueChange = { text = it },
+                            placeholder = { Text("例: 旅行、車の購入など", fontSize = 14.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NotionSafeGreen),
+                            trailingIcon = {
+                                IconButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) {
+                                    Icon(Icons.AutoMirrored.Filled.Send, null, tint = NotionSafeGreen)
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PlanItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String) {
+    Row(modifier = Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.width(60.dp))
+        Text(value, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
 @Composable
 fun GoalSetupView(
     titleText: String,
-    onTitleChange: (String) -> Unit,
     targetAmountText: String,
-    onAmountClick: () -> Unit,
     monthlyIncomeText: String,
-    onIncomeClick: () -> Unit,
     targetDateMillis: Long,
-    onDateClick: () -> Unit,
     dateFormatter: SimpleDateFormat,
     isAmountTooLow: Boolean,
     useVirtualBalance: Boolean,
@@ -534,22 +957,15 @@ fun GoalSetupView(
             label = "目標タイトル",
             color = NotionSafeGreen
         ) {
-            androidx.compose.foundation.text.BasicTextField(
-                value = titleText,
-                onValueChange = onTitleChange,
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                textStyle = androidx.compose.ui.text.TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold),
-                decorationBox = { inner ->
-                    if (titleText.isEmpty()) Text("旅行など", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), fontSize = 16.sp)
-                    inner()
-                },
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focusManager.clearFocus() })
+            Text(
+                text = titleText.ifEmpty { "旅行など" },
+                color = if (titleText.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
             )
         }
         SetupTile(
-            modifier = Modifier.fillMaxWidth().clickable { onAmountClick() },
+            modifier = Modifier.fillMaxWidth(),
             icon = Icons.Default.Star,
             label = "目標貯金額",
             color = if (isAmountTooLow) Color(0xFFE57373) else NotionSafeGreen
@@ -589,7 +1005,7 @@ fun GoalSetupView(
         }
 
         SetupTile(
-            modifier = Modifier.fillMaxWidth().clickable { onIncomeClick() },
+            modifier = Modifier.fillMaxWidth(),
             icon = Icons.AutoMirrored.Filled.TrendingUp,
             label = "平均月収",
             color = NotionSafeGreen
@@ -602,7 +1018,7 @@ fun GoalSetupView(
             )
         }
         SetupTile(
-            modifier = Modifier.fillMaxWidth().clickable { onDateClick() },
+            modifier = Modifier.fillMaxWidth(),
             icon = Icons.Default.CalendarMonth,
             label = "目標達成日",
             color = NotionSafeGreen

@@ -13,7 +13,15 @@ import com.example.nozokima.data.manager.GeminiNanoModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
 import java.util.*
+
+data class GoalProposal(
+    val title: String,
+    val targetAmount: Long,
+    val targetDateMillis: Long,
+    val advice: String
+)
 
 data class HomeUiState(
     val transactions: List<TransactionEntity> = emptyList(),
@@ -24,11 +32,14 @@ data class HomeUiState(
     val goalSetting: GoalSettingEntity? = null,
     val homeAiText: String = "",
     val goalAiText: String = "",
+    val goalProposal: GoalProposal? = null,
+    val goalPlanningMessages: List<com.example.nozokima.model.ChatMessage> = emptyList(),
     val isAiGenerating: Boolean = false,
     val aiStatus: Int = 0, // Using Int as per GeminiNanoModel
     val isAiReady: Boolean = false,
     val isAiCheckingStatus: Boolean = false,
     val isAiInitialized: Boolean = false,
+    val planningStep: Int = 0 // 0: Purpose, 1: Amount, 2: Date, 3: Income, 4: AI Refinement
 )
 
 class HomeViewModel(
@@ -38,6 +49,9 @@ class HomeViewModel(
 
     private val _homeAiText = MutableStateFlow("")
     private val _goalAiText = MutableStateFlow("")
+    private val _goalProposal = MutableStateFlow<GoalProposal?>(null)
+    private val _goalPlanningMessages = MutableStateFlow<List<com.example.nozokima.model.ChatMessage>>(emptyList())
+    private val _planningStep = MutableStateFlow(0)
     
     val uiState: StateFlow<HomeUiState> = combine(
         dao.getAllTransactions(),
@@ -48,6 +62,9 @@ class HomeViewModel(
         dao.getAllScheduledExpenses(),
         _homeAiText.asStateFlow(),
         _goalAiText.asStateFlow(),
+        _goalProposal.asStateFlow(),
+        _goalPlanningMessages.asStateFlow(),
+        _planningStep.asStateFlow(),
         gemini.isGenerating,
         gemini.status,
         gemini.isReady,
@@ -67,11 +84,15 @@ class HomeViewModel(
         val scheduledExpenses = params[5] as List<ScheduledExpenseEntity>
         val homeAiText = params[6] as String
         val goalAiText = params[7] as String
-        val isGenerating = params[8] as Boolean
-        val aiStatus = params[9] as Int
-        val isAiReady = params[10] as Boolean
-        val isAiChecking = params[11] as Boolean
-        val isAiInitialized = params[12] as Boolean
+        val goalProposal = params[8] as GoalProposal?
+        @Suppress("UNCHECKED_CAST")
+        val goalPlanningMessages = params[9] as List<com.example.nozokima.model.ChatMessage>
+        val planningStep = params[10] as Int
+        val isGenerating = params[11] as Boolean
+        val aiStatus = params[12] as Int
+        val isAiReady = params[13] as Boolean
+        val isAiChecking = params[14] as Boolean
+        val isAiInitialized = params[15] as Boolean
 
         HomeUiState(
             transactions = transactions,
@@ -82,11 +103,14 @@ class HomeViewModel(
             scheduledExpenses = scheduledExpenses,
             homeAiText = homeAiText,
             goalAiText = goalAiText,
+            goalProposal = goalProposal,
+            goalPlanningMessages = goalPlanningMessages,
             isAiGenerating = isGenerating,
             aiStatus = aiStatus,
             isAiReady = isAiReady,
             isAiCheckingStatus = isAiChecking,
             isAiInitialized = isAiInitialized,
+            planningStep = planningStep
         )
     }.flowOn(Dispatchers.Default)
     .stateIn(
@@ -270,5 +294,165 @@ class HomeViewModel(
             } catch (_: Exception) {
             }
         }
+    }
+
+    fun planGoal(text: String) {
+        val state = uiState.value
+        if (text.isBlank()) return
+
+        val userMsg = com.example.nozokima.model.ChatMessage(id = UUID.randomUUID().toString(), text = text, isUser = true)
+        _goalPlanningMessages.value = _goalPlanningMessages.value + userMsg
+
+        if (_planningStep.value < 4) {
+            // ここではテキストボックス入力を受け付けない（ボタンUIからのみ入る想定だが、念のためガード）
+            return
+        } else {
+            // ステップ4以降は対話モード
+            triggerPlanningAiDialogue()
+        }
+    }
+
+    fun updatePlanningValue(step: Int, value: String) {
+        val currentStep = _planningStep.value
+        if (step != currentStep) return
+
+        // チャットメッセージとして追加しない
+        _planningStep.value += 1
+        if (_planningStep.value == 4) {
+            triggerPlanningAiAnalysis()
+        }
+    }
+
+    private fun triggerPlanningAiAnalysis() {
+        val state = uiState.value
+        if (!state.isAiReady || state.isAiGenerating) return
+
+        val totalLendingAmount = state.lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
+        val currentAssets = state.assets.sumOf { it.amount } + totalLendingAmount
+        val upcomingTotal = state.scheduledExpenses.asSequence().filter { !it.isCompleted }.sumOf { it.amount }
+        val virtualBalance = currentAssets - upcomingTotal
+        
+        val history = _goalPlanningMessages.value.joinToString("\n") {
+            if (it.isUser) "ユーザー: ${it.text}" else "AI: ${it.text}"
+        }
+
+        val prompt = buildString {
+            appendLine("あなたは家計コンサルタントです。思考過程は省き、おすすめのプランと理由のみを簡潔に出力してください。コンテキスト長を節約するため、冗長な挨拶や説明は不要です。")
+            appendLine("【状況】総資産:¥${String.format(Locale.JAPAN, "%,d", currentAssets)}, 実質残高:¥${String.format(Locale.JAPAN, "%,d", virtualBalance)}")
+            appendLine("【希望】")
+            appendLine(history)
+            appendLine()
+            appendLine("【回答形式】")
+            appendLine("[プランの理由を200文字程度で記述]")
+            appendLine("TITLE: [目標名]")
+            appendLine("AMOUNT: [数値のみ]")
+            appendLine("DATE: [YYYY/MM/DD]")
+            appendLine("ADVICE: [短いアドバイス]")
+        }
+
+        generatePlanningResponse(prompt)
+    }
+
+    private fun triggerPlanningAiDialogue() {
+        val state = uiState.value
+        if (!state.isAiReady || state.isAiGenerating) return
+
+        val totalLendingAmount = state.lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
+        val currentAssets = state.assets.sumOf { it.amount } + totalLendingAmount
+        val upcomingTotal = state.scheduledExpenses.asSequence().filter { !it.isCompleted }.sumOf { it.amount }
+        val virtualBalance = currentAssets - upcomingTotal
+        
+        val history = _goalPlanningMessages.value.joinToString("\n") { 
+            if (it.isUser) "ユーザー: ${it.text}" else "AI: ${it.text}"
+        }
+
+        val prompt = buildString {
+            appendLine("家計コンサルタントとして、ユーザーの要望に応じてプランを修正してください。思考過程は出力せず、結論のみを簡潔に回答してください。")
+            appendLine("【状況】総資産:¥${String.format(Locale.JAPAN, "%,d", currentAssets)}, 実質残高:¥${String.format(Locale.JAPAN, "%,d", virtualBalance)}")
+            appendLine("【会話】")
+            appendLine(history)
+            appendLine()
+            appendLine("【回答形式】")
+            appendLine("[修正理由や回答を簡潔に記述]")
+            appendLine("TITLE: [目標名]")
+            appendLine("AMOUNT: [数値のみ]")
+            appendLine("DATE: [YYYY/MM/DD]")
+            appendLine("ADVICE: [短いアドバイス]")
+        }
+
+        generatePlanningResponse(prompt)
+    }
+
+    private fun generatePlanningResponse(prompt: String) {
+        val aiMsgId = UUID.randomUUID().toString()
+        viewModelScope.launch {
+            var accumulatedText = ""
+            try {
+                gemini.generateResponseStream(prompt).collect { chunk ->
+                    accumulatedText += chunk
+                    val currentMessages = _goalPlanningMessages.value.toMutableList()
+                    val existingAiMsgIndex = currentMessages.indexOfFirst { it.id == aiMsgId }
+                    val aiMsg = com.example.nozokima.model.ChatMessage(id = aiMsgId, text = accumulatedText, isUser = false)
+                    
+                    if (existingAiMsgIndex != -1) {
+                        currentMessages[existingAiMsgIndex] = aiMsg
+                    } else {
+                        currentMessages.add(aiMsg)
+                    }
+                    _goalPlanningMessages.value = currentMessages
+                }
+                parseAndSetProposal(accumulatedText)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun startGoalPlanning() {
+        if (_goalPlanningMessages.value.isNotEmpty()) return
+        _planningStep.value = 0
+        _goalPlanningMessages.value = listOf(
+            com.example.nozokima.model.ChatMessage(
+                id = UUID.randomUUID().toString(),
+                text = "こんにちは。目標設定のお手伝いをします。\nまずは、何のために貯金をしたいか教えてください。（例：旅行、車の購入など）",
+                isUser = false
+            )
+        )
+    }
+
+    private fun parseAndSetProposal(text: String) {
+        val lines = text.lines()
+        var title = ""
+        var amount = 0L
+        var dateMillis = 0L
+        var advice = ""
+
+        lines.forEach { line ->
+            val trimmedLine = line.trim()
+            when {
+                trimmedLine.startsWith("TITLE:") -> title = trimmedLine.removePrefix("TITLE:").trim()
+                trimmedLine.startsWith("AMOUNT:") -> {
+                    val amountStr = trimmedLine.removePrefix("AMOUNT:").trim().filter { it.isDigit() }
+                    amount = amountStr.toLongOrNull() ?: 0L
+                }
+                trimmedLine.startsWith("DATE:") -> {
+                    val dateStr = trimmedLine.removePrefix("DATE:").trim()
+                    try {
+                        val sdf = SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN)
+                        dateMillis = sdf.parse(dateStr)?.time ?: 0L
+                    } catch (_: Exception) {}
+                }
+                trimmedLine.startsWith("ADVICE:") -> advice = trimmedLine.removePrefix("ADVICE:").trim()
+            }
+        }
+
+        if (title.isNotEmpty() && amount > 0L && dateMillis > 0L) {
+            _goalProposal.value = GoalProposal(title, amount, dateMillis, advice)
+        }
+    }
+
+    fun clearGoalProposal() {
+        _goalProposal.value = null
+        _goalPlanningMessages.value = emptyList()
+        _planningStep.value = 0
     }
 }
