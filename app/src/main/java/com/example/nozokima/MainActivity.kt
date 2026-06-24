@@ -113,7 +113,6 @@ class MainActivity : FragmentActivity() {
             val homeViewModel: HomeViewModel = viewModel(factory = factory)
             
             val mainUiState by mainViewModel.uiState.collectAsState()
-            val homeUiState by homeViewModel.uiState.collectAsState()
 
             val appSettings = mainUiState.appSettings ?: AppSettingsEntity()
             val themeMode = appSettings.themeMode
@@ -143,7 +142,6 @@ class MainActivity : FragmentActivity() {
             var recoveryLending by remember { mutableStateOf<LendingEntity?>(null) }
             var initialInputMode by remember { mutableStateOf<String?>(null) }
             var initialHistoryMode by remember { mutableStateOf(value = false) }
-            var isGoalKeypadVisible by remember { mutableStateOf(value = false) }
 
             var backupPassword by remember { mutableStateOf("") }
             var showBackupPasswordDialog by remember { mutableStateOf(value = false) }
@@ -568,7 +566,7 @@ class MainActivity : FragmentActivity() {
                                                                     initialHistoryMode = true
                                                                     selectedTab = 2
                                                                 },
-                                                                onGoalClick = { selectedTab = 6 },
+                                                                onGoalClick = { /* Disabled */ },
                                                                 onSettingsClick = { selectedTab = 4 }
                                                             )
                                                         }
@@ -703,28 +701,6 @@ class MainActivity : FragmentActivity() {
                                                         }
                                                         5 -> Box(Modifier.padding(innerPadding)) {
                                                             CategoryManagementScreen(dao = dao, onBack = { selectedTab = 4 })
-                                                        }
-                                                        6 -> Box(Modifier.padding(innerPadding)) {
-                                                            GoalSettingContent(
-                                                                dao = dao,
-                                                                aiStatus = homeUiState.aiStatus,
-                                                                aiIsReady = homeUiState.isAiReady,
-                                                                aiIsGenerating = homeUiState.isAiGenerating,
-                                                                aiIsChecking = homeUiState.isAiCheckingStatus,
-                                                                aiIsInitialized = homeUiState.isAiInitialized,
-                                                                goalAiText = homeUiState.goalAiText,
-                                                                goalProposal = homeUiState.goalProposal,
-                                                                goalPlanningMessages = homeUiState.goalPlanningMessages,
-                                                                planningStep = homeUiState.planningStep,
-                                                                onStartPlanning = { homeViewModel.startGoalPlanning() },
-                                                                onUpdatePlanningValue = { step, value -> homeViewModel.updatePlanningValue(step, value) },
-                                                                onPlanGoal = { homeViewModel.planGoal(it) },
-                                                                onClearProposal = { homeViewModel.clearGoalProposal() },
-                                                                onRefreshAi = { homeViewModel.triggerGoalAnalysis() },
-                                                                isKeypadVisible = isGoalKeypadVisible,
-                                                                onKeypadVisibilityChange = { isGoalKeypadVisible = it },
-                                                                onBack = { selectedTab = 0 }
-                                                            )
                                                         }
                                                     }
                                                 }

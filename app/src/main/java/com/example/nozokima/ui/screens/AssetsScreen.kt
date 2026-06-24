@@ -632,28 +632,7 @@ fun AssetsScreen(
                                                         balanceAfter = tx.assetName,
                                                         color = historyItemColor,
                                                         icon = historyIconMap[tx.category] ?: Icons.Default.MoreHoriz,
-                                                        onLongClick = { transactionToDelete = tx },
-                                                        isReorderable = true,
-                                                        onMoveUp = if (idx > 0) {
-                                                            {
-                                                                scope.launch {
-                                                                    val prev = txList[idx - 1]
-                                                                    val temp = tx.sortOrder
-                                                                    dao.updateTransaction(tx.copy(sortOrder = prev.sortOrder))
-                                                                    dao.updateTransaction(prev.copy(sortOrder = temp))
-                                                                }
-                                                            }
-                                                        } else null,
-                                                        onMoveDown = if (idx < txList.lastIndex) {
-                                                            {
-                                                                scope.launch {
-                                                                    val next = txList[idx + 1]
-                                                                    val temp = tx.sortOrder
-                                                                    dao.updateTransaction(tx.copy(sortOrder = next.sortOrder))
-                                                                    dao.updateTransaction(next.copy(sortOrder = temp))
-                                                                }
-                                                            }
-                                                        } else null
+                                                        onLongClick = { transactionToDelete = tx }
                                                     )
                                                     if (idx < txList.lastIndex) {
                                                         HorizontalDivider(

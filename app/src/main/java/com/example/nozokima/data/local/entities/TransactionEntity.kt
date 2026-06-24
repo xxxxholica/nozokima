@@ -13,6 +13,5 @@ data class TransactionEntity(
     val assetName: String,
     val isExpense: Boolean = true,
     val toAssetName: String? = null,
-    val isTransfer: Boolean = false,
-    val sortOrder: Long = System.currentTimeMillis()
+    val isTransfer: Boolean = false
 )

@@ -14,7 +14,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -117,7 +116,6 @@ fun HomeScreen(
                 appSettings = appSettings,
                 onRefreshAi = { viewModel.triggerHomeAnalysis(force = true) },
                 onAiAdviceClick = onAiAdviceClick,
-                onGoalClick = onGoalClick,
             ) {
                 scope.launch {
                     val current = appSettings ?: AppSettingsEntity()
@@ -146,7 +144,6 @@ fun DashboardCard(
     appSettings: AppSettingsEntity?,
     onRefreshAi: () -> Unit,
     onAiAdviceClick: (String) -> Unit,
-    onGoalClick: () -> Unit,
     onToggleAssetsVisibility: () -> Unit,
 ) {
     val totalLendingAmount = remember(uiState.lendings) {
@@ -161,37 +158,6 @@ fun DashboardCard(
     }
     val virtualBalance = currentAssets - upcomingTotal - totalLendingAmount.toLong()
 
-    val startOfMonth = remember {
-        Calendar.getInstance().apply {
-            set(Calendar.DAY_OF_MONTH, 1)
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
-    }
-
-    val spentThisMonth = remember(uiState.transactions, startOfMonth) {
-        uiState.transactions.asSequence()
-            .filter { (it.date >= startOfMonth) && it.isExpense && (it.category != "貸付") }
-            .sumOf { it.amount }
-    }.toLong()
-
-    val isGoalSet = (uiState.goalSetting != null) && uiState.goalSetting.showResults && (uiState.goalSetting.targetAmount > 0)
-    val goalMonthlyBudget = remember(uiState.goalSetting, virtualBalance, isGoalSet) {
-        if (isGoalSet) {
-            val currentGoal = uiState.goalSetting
-            val remainingDays = ((currentGoal.targetDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
-            val remainingMonths = (remainingDays / 30.0).coerceAtLeast(0.1)
-            val totalExpectedIncome = (currentGoal.monthlyIncome * remainingMonths).toLong()
-            val currentAssetsForGoal = if (currentGoal.useVirtualBalance) virtualBalance else currentAssets
-            val totalSpendable = (currentAssetsForGoal + totalExpectedIncome - currentGoal.targetAmount).coerceAtLeast(0L)
-            if (remainingMonths > 0) (totalSpendable / remainingMonths).toLong() else 0L
-        } else null
-    }
-
-    val monthlyBudget = goalMonthlyBudget ?: virtualBalance
-    val spentThisMonthForProgress = if (isGoalSet) spentThisMonth else 0L
 
     val daysUntilReset = remember {
         val cal = Calendar.getInstance()
@@ -212,17 +178,10 @@ fun DashboardCard(
                 isAssetsVisible = appSettings?.isAssetsVisible ?: true,
                 onToggleVisibility = onToggleAssetsVisibility
             )
-            Spacer(modifier = Modifier.height(16.dp))
-            BudgetProgressSection(
-                monthlyBudget = monthlyBudget,
-                spentThisMonth = spentThisMonthForProgress,
-                onBudgetClick = onGoalClick
-            )
             Spacer(modifier = Modifier.height(20.dp))
             GoalProgressSection(
                 goalSetting = uiState.goalSetting,
-                actualAssetsForGoal = if (uiState.goalSetting?.useVirtualBalance == true) virtualBalance else currentAssets,
-                onGoalClick = onGoalClick
+                actualAssetsForGoal = if (uiState.goalSetting?.useVirtualBalance == true) virtualBalance else currentAssets
             )
 
             val latestExpense = remember(uiState.transactions) {
@@ -284,72 +243,9 @@ fun AssetHeader(
 }
 
 @Composable
-fun BudgetProgressSection(monthlyBudget: Long, spentThisMonth: Long, onBudgetClick: () -> Unit = {}) {
-    val remainingAmount = monthlyBudget - spentThisMonth
-    val spentRatio = if (monthlyBudget > 0) spentThisMonth.toFloat() / monthlyBudget.toFloat() else 0f
-    val budgetAmountColor = when {
-        spentThisMonth == 0L -> NotionSafeGreen // 目標未設定時など
-        spentRatio >= 1.0f -> Color(0xFFE57373)
-        spentRatio >= 0.5f -> Color(0xFFFFB74D)
-        else -> NotionSafeGreen
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onBudgetClick() }
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("あといくら使える？", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "¥ ${String.format(Locale.JAPAN, "%,d", remainingAmount)}",
-                    color = budgetAmountColor,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = budgetAmountColor,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        var progressTrigger by remember { mutableStateOf(value = false) }
-        LaunchedEffect(Unit) { progressTrigger = true }
-        
-        // spentThisMonthが0の場合は進捗バーを空にする（逆転して「残り100%」を表現）
-        val displaySpentProgress = if (progressTrigger && monthlyBudget > 0) (spentThisMonth.toFloat() / monthlyBudget.toFloat()).coerceIn(0f, 1f) else 0f
-        val animatedSpentProgress by animateFloatAsState(
-            targetValue = displaySpentProgress,
-            animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
-            label = "spentProgress"
-        )
-        
-        // spentThisMonthが0の場合、trackColorをNotionSafeGreenに、color（消費分）を透明にすることで「100%残り」を表現
-        LinearProgressIndicator(
-            progress = { animatedSpentProgress },
-            modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)),
-            color = if (spentThisMonth == 0L) Color.Transparent else budgetAmountColor,
-            trackColor = if (spentThisMonth == 0L) NotionSafeGreen else MaterialTheme.colorScheme.outline,
-            strokeCap = StrokeCap.Round
-        )
-    }
-}
-
-@Composable
 fun GoalProgressSection(
     goalSetting: GoalSettingEntity?,
-    actualAssetsForGoal: Long,
-    onGoalClick: () -> Unit
+    actualAssetsForGoal: Long
 ) {
     val hasGoal = goalSetting != null && goalSetting.targetAmount > 0 && goalSetting.showResults
     
@@ -379,7 +275,6 @@ fun GoalProgressSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onGoalClick() }
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -408,13 +303,6 @@ fun GoalProgressSection(
                         fontWeight = FontWeight.Bold
                     )
                 }
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = if (hasGoal) goalBarColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.size(20.dp)
-                )
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
@@ -675,7 +563,8 @@ fun QuickAccessSection(
                 icon = Icons.Default.Flag,
                 color = Color(0xFF00897B),
                 onClick = onGoalClick,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                enabled = false // Gray out and disable Goal button
             )
             QuickAccessItem(
                 label = "履歴",
@@ -694,15 +583,18 @@ fun QuickAccessItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     color: Color,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
 ) {
     Surface(
-        onClick = onClick,
+        onClick = { if (enabled) onClick() },
         modifier = modifier.aspectRatio(1f),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        border = BorderStroke(1.dp, if (enabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
     ) {
+        val displayColor = if (enabled) color else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+        
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -711,13 +603,13 @@ fun QuickAccessItem(
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .background(color.copy(alpha = 0.1f), CircleShape),
+                    .background(displayColor.copy(alpha = 0.1f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = label,
-                    tint = color,
+                    tint = displayColor,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -726,7 +618,7 @@ fun QuickAccessItem(
                 text = label,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

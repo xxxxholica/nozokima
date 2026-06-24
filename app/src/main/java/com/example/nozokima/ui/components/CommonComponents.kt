@@ -11,9 +11,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -148,15 +145,9 @@ fun AssetHistoryItem(
     color: Color,
     icon: ImageVector = Icons.Default.MoreHoriz,
     onClick: () -> Unit = {},
-    onLongClick: () -> Unit = {},
-    onMoveUp: (() -> Unit)? = null,
-    onMoveDown: (() -> Unit)? = null,
-    isReorderable: Boolean = false
+    onLongClick: () -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
-    
-    // 長押しジェスチャーを検知するための処理
-    // ≡ アイコンへの長押しで入れ替えアクションを実行する
     
     Row(
         modifier = Modifier
@@ -170,28 +161,6 @@ fun AssetHistoryItem(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-            if (isReorderable) {
-                Box(
-                    modifier = Modifier
-                        .combinedClickable(
-                            onClick = {},
-                            onLongClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                // 長押しされた時に「次」のものと入れ替える（簡易ドラッグ操作の代わり）
-                                onMoveDown?.invoke() ?: onMoveUp?.invoke()
-                            }
-                        )
-                        .padding(end = 12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Menu,
-                        contentDescription = "長押しで移動",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-            
             Box(
                 modifier = Modifier
                     .size(38.dp)
@@ -209,22 +178,6 @@ fun AssetHistoryItem(
         }
         
         Text(amount, color = color, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-
-        if (!isReorderable && (onMoveUp != null || onMoveDown != null)) {
-            Spacer(Modifier.width(8.dp))
-            Column {
-                if (onMoveUp != null) {
-                    IconButton(onClick = onMoveUp, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.KeyboardArrowUp, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
-                    }
-                }
-                if (onMoveDown != null) {
-                    IconButton(onClick = onMoveDown, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
-        }
     }
 }
 
