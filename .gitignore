@@ -29,3 +29,4 @@
 *.hprof
 .externalNativeBuild/
 .cxx/
+.idea/
