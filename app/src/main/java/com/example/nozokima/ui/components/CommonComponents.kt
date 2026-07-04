@@ -27,7 +27,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.nozokima.model.assetTypeUiSpec
-import ui.theme.*
 import java.util.Locale
 
 @Composable

@@ -21,11 +21,11 @@ if (isWindows) {
 }
 
 extensions.configure<ApplicationExtension> {
-    namespace = "com.example.nozokima"
+    namespace = "works.hinata.nozokima"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.example.nozokima"
+        applicationId = "works.hinata.nozokima"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
