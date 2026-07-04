@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.nozokima.data.local.FinanceDao
 import com.example.nozokima.data.local.entities.*
+import com.example.nozokima.model.*
 import com.example.nozokima.ui.components.getCategoryIcon
 import com.example.nozokima.ui.components.ThinkingAnimation
 import com.example.nozokima.ui.viewmodel.HomeViewModel
@@ -65,9 +66,16 @@ fun HomeScreen(
         }
     }
 
-    // 最新の支出を監視
-    val latestTxId = remember(uiState.transactions) {
-        uiState.transactions.asSequence().filter { it.isExpense && it.category != "貸付" }.maxByOrNull { it.date }?.id
+    // 最新の支出を監視 (通常の支出 + 支払い予定の未完了分)
+    val latestTxId = remember(uiState.transactions, uiState.scheduledExpenses) {
+        val tx = uiState.transactions.asSequence().filter { it.isExpense && it.category != "貸付" }.maxByOrNull { it.date }
+        val se = uiState.scheduledExpenses.asSequence().filter { !it.isCompleted }.maxByOrNull { it.date }
+        
+        if (tx != null && se != null) {
+            if (tx.date > se.date) tx.id else se.id
+        } else {
+            tx?.id ?: se?.id
+        }
     }
 
     // 初回生成および最新支出変更時の自動トリガー
@@ -146,12 +154,7 @@ fun DashboardCard(
     onAiAdviceClick: (String) -> Unit,
     onToggleAssetsVisibility: () -> Unit,
 ) {
-    val totalLendingAmount = remember(uiState.lendings) {
-        uiState.lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
-    }
-    val currentAssets = remember(uiState.assets, totalLendingAmount) {
-        uiState.assets.sumOf { it.amount } + totalLendingAmount
-    }.toLong()
+    val currentAssets = uiState.virtualBalance
 
     Box(
         modifier = Modifier
@@ -168,8 +171,22 @@ fun DashboardCard(
                 onToggleVisibility = onToggleAssetsVisibility
             )
 
-            val latestExpense = remember(uiState.transactions) {
-                uiState.transactions.asSequence().filter { it.isExpense && it.category != "貸付" }.maxByOrNull { it.date }
+            val latestExpense = remember(uiState.transactions, uiState.scheduledExpenses) {
+                val tx = uiState.transactions.asSequence().filter { it.isExpense && it.category != "貸付" }.maxByOrNull { it.date }
+                val se = uiState.scheduledExpenses.asSequence().filter { !it.isCompleted }.maxByOrNull { it.date }
+                
+                when {
+                    tx != null && se != null -> {
+                        if (tx.date > se.date) {
+                            DisplayExpense(tx.name, tx.amount, tx.category, tx.date)
+                        } else {
+                            DisplayExpense(se.name, se.amount, se.category, se.date)
+                        }
+                    }
+                    tx != null -> DisplayExpense(tx.name, tx.amount, tx.category, tx.date)
+                    se != null -> DisplayExpense(se.name, se.amount, se.category, se.date)
+                    else -> null
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -202,7 +219,7 @@ fun AssetHeader(
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("資産総額", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Text("実質残高", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                     IconButton(
                         onClick = onToggleVisibility,
                         modifier = Modifier.size(24.dp).padding(start = 4.dp)
@@ -236,9 +253,17 @@ fun AssetHeader(
             set(Calendar.MILLISECOND, 0)
         }
         val startOfMonth = calendar.timeInMillis
+        val nextMonthCalendar = (calendar.clone() as Calendar).apply {
+            add(Calendar.MONTH, 1)
+        }
+        val startOfNextMonth = nextMonthCalendar.timeInMillis
+
         val spentThisMonth = uiState.transactions.asSequence()
-            .filter { (it.date >= startOfMonth) && it.isExpense && (it.category != "貸付") }
-            .sumOf { it.amount }
+            .filter { (it.date >= startOfMonth) && (it.date < startOfNextMonth) && it.isExpense && (it.category != "貸付") }
+            .sumOf { it.amount } +
+            uiState.scheduledExpenses.asSequence()
+                .filter { (it.date >= startOfMonth) && (it.date < startOfNextMonth) && !it.isCompleted }
+                .sumOf { it.amount }
         
         val monthlyBudget = if (hasGoal) {
             when (goal!!.selectedPlanType) {
@@ -315,7 +340,7 @@ fun AssetHeader(
 @Composable
 fun AiAnalysisSection(
     uiState: HomeUiState,
-    latestExpense: TransactionEntity?,
+    latestExpense: DisplayExpense?,
     onRefreshAi: () -> Unit,
     onAiAdviceClick: (String) -> Unit
 ) {
@@ -443,7 +468,7 @@ fun AiAnalysisSection(
                                     .background(Color(0xFFE57373).copy(alpha = 0.1f), RoundedCornerShape(8.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(getCategoryIcon(latestExpense.category), null, tint = Color(0xFFE57373), modifier = Modifier.size(16.dp))
+                                Icon(getCategoryIcon(latestExpense.category, uiState.categories), null, tint = Color(0xFFE57373), modifier = Modifier.size(16.dp))
                             }
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {

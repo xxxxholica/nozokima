@@ -646,6 +646,7 @@ class MainActivity : FragmentActivity() {
                                                                         assets = homeViewModel.uiState.collectAsState().value.assets,
                                                                         lendings = homeViewModel.uiState.collectAsState().value.lendings,
                                                                         transactions = homeViewModel.uiState.collectAsState().value.transactions,
+                                                                        categories = homeViewModel.uiState.collectAsState().value.categories,
                                                                         chatSessions = mainUiState.chatSessions,
                                                                         drawerState = drawerState,
                                                                         currentSessionId = currentChatSessionId,

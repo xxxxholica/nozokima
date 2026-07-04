@@ -9,6 +9,7 @@ import com.example.nozokima.data.local.entities.AssetEntity
 import com.example.nozokima.data.local.entities.LendingEntity
 import com.example.nozokima.data.local.entities.BudgetEntity
 import com.example.nozokima.data.local.entities.ScheduledExpenseEntity
+import com.example.nozokima.data.local.entities.CategoryEntity
 import com.example.nozokima.data.manager.GeminiNanoModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -21,7 +22,9 @@ data class HomeUiState(
     val lendings: List<LendingEntity> = emptyList(),
     val budgets: List<BudgetEntity> = emptyList(),
     val scheduledExpenses: List<ScheduledExpenseEntity> = emptyList(),
+    val categories: List<CategoryEntity> = emptyList(),
     val goalSetting: GoalSettingEntity? = null,
+    val virtualBalance: Long = 0L,
     val homeAiText: String = "",
     val isAiGenerating: Boolean = false,
     val aiStatus: Int = 0,
@@ -44,6 +47,7 @@ class HomeViewModel(
         dao.getAllBudgets(),
         dao.getGoalSetting(),
         dao.getAllScheduledExpenses(),
+        dao.getAllCategories(),
         _homeAiText.asStateFlow(),
         gemini.isGenerating,
         gemini.status,
@@ -62,20 +66,29 @@ class HomeViewModel(
         val goalSetting = params[4] as GoalSettingEntity?
         @Suppress("UNCHECKED_CAST")
         val scheduledExpenses = params[5] as List<ScheduledExpenseEntity>
-        val homeAiText = params[6] as String
-        val isGenerating = params[7] as Boolean
-        val aiStatus = params[8] as Int
-        val isAiReady = params[9] as Boolean
-        val isAiChecking = params[10] as Boolean
-        val isAiInitialized = params[11] as Boolean
+        @Suppress("UNCHECKED_CAST")
+        val categories = params[6] as List<CategoryEntity>
+        val homeAiText = params[7] as String
+        val isGenerating = params[8] as Boolean
+        val aiStatus = params[9] as Int
+        val isAiReady = params[10] as Boolean
+        val isAiChecking = params[11] as Boolean
+        val isAiInitialized = params[12] as Boolean
+
+        val totalLendingAmount = lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
+        val currentAssets = (assets.sumOf { it.amount } + totalLendingAmount).toLong()
+        val upcomingTotal = scheduledExpenses.asSequence().filter { !it.isCompleted }.sumOf { it.amount }
+        val virtualBalance = currentAssets - upcomingTotal
 
         HomeUiState(
             transactions = transactions,
             assets = assets,
             lendings = lendings,
             budgets = budgets,
-            goalSetting = goalSetting,
             scheduledExpenses = scheduledExpenses,
+            categories = categories,
+            goalSetting = goalSetting,
+            virtualBalance = virtualBalance,
             homeAiText = homeAiText,
             isAiGenerating = isGenerating,
             aiStatus = aiStatus,
@@ -160,10 +173,7 @@ class HomeViewModel(
         val state = uiState.value
         if (!state.isAiReady || state.isAiGenerating) return
         
-        val totalLendingAmount = state.lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
-        val currentAssets = (state.assets.sumOf { it.amount } + totalLendingAmount).toLong()
-        val upcomingTotal = state.scheduledExpenses.asSequence().filter { !it.isCompleted }.sumOf { it.amount }
-        val virtualBalance = currentAssets - upcomingTotal
+        val virtualBalance = state.virtualBalance
 
         val calendar = Calendar.getInstance().apply {
             set(Calendar.DAY_OF_MONTH, 1)
@@ -173,32 +183,68 @@ class HomeViewModel(
             set(Calendar.MILLISECOND, 0)
         }
         val startOfMonth = calendar.timeInMillis
-        val spentThisMonth = state.transactions.asSequence()
-            .filter { (it.date >= startOfMonth) && it.isExpense && (it.category != "貸付") }
-            .sumOf { it.amount }
-            
-        val monthlyBudget = state.budgets.sumOf { it.monthlyAmount }.let { if (it == 0) 100000L else it.toLong() }
+        val nextMonthCalendar = (calendar.clone() as Calendar).apply {
+            add(Calendar.MONTH, 1)
+        }
+        val startOfNextMonth = nextMonthCalendar.timeInMillis
 
+        val spentThisMonth = state.transactions.asSequence()
+            .filter { (it.date >= startOfMonth) && (it.date < startOfNextMonth) && it.isExpense && (it.category != "貸付") }
+            .sumOf { it.amount } +
+            state.scheduledExpenses.asSequence()
+                .filter { (it.date >= startOfMonth) && (it.date < startOfNextMonth) && !it.isCompleted }
+                .sumOf { it.amount }
+            
         val currentGoal = state.goalSetting
+        val hasGoal = currentGoal != null && currentGoal.targetAmount > 0 && currentGoal.showResults
+        
+        val monthlyBudget = if (hasGoal) {
+            when (currentGoal!!.selectedPlanType) {
+                "RELAXED" -> currentGoal.relaxedMonthlyBudget
+                "SPEED" -> currentGoal.speedMonthlyBudget
+                else -> currentGoal.aiMonthlyBudget
+            }
+        } else {
+            state.budgets.sumOf { it.monthlyAmount }.let { if (it == 0) 100000L else it.toLong() }
+        }
+
+        val totalLendingAmount = state.lendings.asSequence().filter { !it.isRecovered }.sumOf { it.amount - it.recoveredAmount }
+        val currentAssets = (state.assets.sumOf { it.amount } + totalLendingAmount).toLong()
         val currentAssetsForGoal = if (currentGoal?.useVirtualBalance == true) virtualBalance else currentAssets
 
-        val hasGoal = currentGoal != null && currentGoal.targetAmount > 0 && currentGoal.showResults
-        val goalProgressRatio = if (hasGoal) (currentAssetsForGoal.toFloat() / currentGoal.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
+        val goalProgressRatio = if (hasGoal) (currentAssetsForGoal.toFloat() / currentGoal!!.targetAmount.toFloat()).coerceIn(0f, 1f) else 0f
 
-        val latestExpense = state.transactions.asSequence().filter { it.isExpense && it.category != "貸付" }.maxByOrNull { it.date }
+        val latestTx = state.transactions.asSequence().filter { it.isExpense && it.category != "貸付" }.maxByOrNull { it.date }
+        val latestSe = state.scheduledExpenses.asSequence().filter { !it.isCompleted }.maxByOrNull { it.date }
+        
+        val latestId = if (latestTx != null && latestSe != null) {
+            if (latestTx.date > latestSe.date) latestTx.id else latestSe.id
+        } else {
+            latestTx?.id ?: latestSe?.id
+        }
+        val latestAmount = if (latestTx != null && latestSe != null) {
+            if (latestTx.date > latestSe.date) latestTx.amount else latestSe.amount
+        } else {
+            latestTx?.amount ?: latestSe?.amount
+        }
+        val latestName = if (latestTx != null && latestSe != null) {
+            if (latestTx.date > latestSe.date) latestTx.name else latestSe.name
+        } else {
+            latestTx?.name ?: latestSe?.name
+        }
 
         if (!force && _homeAiText.value.isNotEmpty() &&
-            latestExpense?.id == lastHomeTriggerExpenseId &&
-            latestExpense?.amount == lastHomeTriggerExpenseAmount &&
-            latestExpense?.name == lastHomeTriggerExpenseName &&
+            latestId == lastHomeTriggerExpenseId &&
+            latestAmount == lastHomeTriggerExpenseAmount &&
+            latestName == lastHomeTriggerExpenseName &&
             spentThisMonth == lastHomeTriggerSpentThisMonth &&
             virtualBalance.toInt() == lastHomeTriggerVirtualBalance) {
             return
         }
 
-        lastHomeTriggerExpenseId = latestExpense?.id
-        lastHomeTriggerExpenseAmount = latestExpense?.amount
-        lastHomeTriggerExpenseName = latestExpense?.name
+        lastHomeTriggerExpenseId = latestId
+        lastHomeTriggerExpenseAmount = latestAmount
+        lastHomeTriggerExpenseName = latestName
         lastHomeTriggerSpentThisMonth = spentThisMonth
         lastHomeTriggerVirtualBalance = virtualBalance.toInt()
 
@@ -209,8 +255,8 @@ class HomeViewModel(
             if (!hasData) {
                 appendLine("ユーザーはまだ家計簿にデータを入力していません。")
                 appendLine("「覗き魔」らしく、ユーザーの隠し事やこれからの浪費を期待するような、少し意地の悪い一言で記録を促してください。")
-            } else if (latestExpense != null) {
-                appendLine("最新の支出（${latestExpense.name}: ¥${String.format(Locale.JAPAN, "%,d", latestExpense.amount)}）を踏まえ、ユーザーの自制心を揺さぶる鋭い皮肉を1つだけ返してください。")
+            } else if (latestId != null) {
+                appendLine("最新の支出（${latestName}: ¥${String.format(Locale.JAPAN, "%,d", latestAmount)}）を踏まえ、ユーザーの自制心を揺さぶる鋭い皮肉を1つだけ返してください。")
             } else {
                 appendLine("現在の資産状況を踏まえ、将来への不安を煽るような、あるいは現在の緩みを指摘する鋭いアドバイスを1つだけ返してください。")
             }

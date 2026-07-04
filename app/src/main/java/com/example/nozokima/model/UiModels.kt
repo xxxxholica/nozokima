@@ -74,3 +74,10 @@ data class SavedRecordInfo(
     val memo: String,
     val aiAdvice: String? = null
 )
+
+data class DisplayExpense(
+    val name: String,
+    val amount: Int,
+    val category: String,
+    val date: Long
+)

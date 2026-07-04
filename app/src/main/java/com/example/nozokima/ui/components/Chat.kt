@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.nozokima.data.local.entities.CategoryEntity
 import com.example.nozokima.model.ChatMessage
 import com.example.nozokima.util.parseMarkdown
 import ui.theme.*
@@ -26,7 +27,7 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun ChatBubble(message: ChatMessage) {
+fun ChatBubble(message: ChatMessage, categories: List<CategoryEntity> = emptyList()) {
     if (message.isUser) {
         val txCardRegex = Regex("\\[TX_CARD:(.*?)\\|(.*?)\\|(.*?)\\|(.*?)]")
         val matchResult = txCardRegex.find(message.text)
@@ -86,7 +87,7 @@ fun ChatBubble(message: ChatMessage) {
                             memo = category,
                             balanceAfter = SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(date)),
                             color = Color(0xFFE57373),
-                            icon = getCategoryIcon(category),
+                            icon = getCategoryIcon(category, categories),
                             onLongClick = {}
                         )
                     }

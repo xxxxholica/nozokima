@@ -69,7 +69,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 // --- プリセット質問 ---
-private val PRESET_QUESTIONS = emptyList<String>()
+// 削除済み
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,6 +81,7 @@ fun ConsultationScreen(
     assets: List<AssetEntity> = emptyList(),
     lendings: List<LendingEntity> = emptyList(),
     transactions: List<TransactionEntity> = emptyList(),
+    categories: List<CategoryEntity> = emptyList(),
     chatSessions: List<ChatSessionEntity> = emptyList(),
     drawerState: DrawerState,
     currentSessionId: String? = null,
@@ -98,7 +99,6 @@ fun ConsultationScreen(
     
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    var suggestedQuestions by remember { mutableStateOf(PRESET_QUESTIONS.shuffled().take(3)) }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -125,56 +125,9 @@ fun ConsultationScreen(
 
     val showLoading = !isInitialized || isChecking
 
-    // --- サジェスト生成ロジック ---
-    fun generateSuggestions(currentMessages: List<ChatMessageEntity>) {
-        if ((gemini == null) || !isReady || isGenerating) return
-        scope.launch {
-            val assetContext = buildString {
-                if (assets.isNotEmpty()) {
-                    appendLine("【現在の資産状況】")
-                    assets.forEach { appendLine("- ${it.name}: ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})") }
-                }
-                val activeLendings = lendings.filter { !it.isRecovered }
-                if (activeLendings.isNotEmpty()) {
-                    appendLine("【貸付状況】")
-                    activeLendings.forEach { appendLine("- ${it.personName}への貸付: ¥${String.format(Locale.JAPAN, "%,d", it.amount - it.recoveredAmount)}") }
-                }
-            }
-            val historyContext = "【最近の会話】\n" + currentMessages.takeLast(5).joinToString("\n") {
-                "${if (it.isUser) "ユーザー" else "AI"}: ${it.text}"
-            }
-            val prompt = """
-                あなたは丁寧な言葉遣いながらも、事実に基づいた鋭い指摘や皮肉でユーザーをハッとさせる「家計の覗き魔」です。
-                これまでのユーザーとの会話や現在の資産状況を踏まえて、ユーザーが思わずあなたに聞いてしまいたくなるような問いかけを3つ提案してください。
-                
-                $assetContext
-                
-                $historyContext
-                
-                【出力ルール】
-                ・ユーザー目線でのセリフのみを1行に1つ、合計3行で出力してください。
-                ・「私、またやっちゃいました？」「正直、今の私ってどう見えますか？」「どこを削れば、マシになりますか？」など、ユーザーが自虐的に問いかけたり、現状の確認を求めるような表現にしてください。
-                ・回答に忠実に答えるための質問文のみを1行に1つ、合計3行で出力してください。
-                ・記号や箇条書きマークは含めないでください。
-                ・質問は20文字以内で出力してください。
-                
-                自己紹介や、自身の役割への言及は禁止です。
-            """.trimIndent()
-            
-            try {
-                val response = gemini.generateResponse(prompt)
-                suggestedQuestions = response.lineSequence().filter { it.isNotBlank() }.take(3).toList()
-            } catch (_: Exception) {
-                suggestedQuestions = emptyList()
-            }
-        }
-    }
 
     // 画面表示時またはセッション初期化時にサジェストを更新
     LaunchedEffect(currentSessionId) {
-        if (currentSessionId == null) {
-            suggestedQuestions = PRESET_QUESTIONS.shuffled().take(3)
-        }
     }
 
     // 初期相談データの処理
@@ -199,7 +152,6 @@ fun ConsultationScreen(
                 
                 onSessionSelected(sessionId)
                 onClearConsultation()
-                suggestedQuestions = emptyList()
 
                 // AI応答の生成
                 if (gemini != null && isReady) {
@@ -247,8 +199,6 @@ fun ConsultationScreen(
                             accumulatedText += chunk
                             dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = accumulatedText, isUser = false))
                         }
-                        // 生成完了後にサジェストを生成
-                        generateSuggestions(dao.getMessagesForSessionSync(sessionId))
                     } catch (_: Exception) {
                         dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "分析中にエラーが発生しました。", isUser = false))
                     }
@@ -280,10 +230,6 @@ fun ConsultationScreen(
                     isUser = true
                 ))
                 
-                onSessionSelected(sessionId)
-                onClearHomeAdvice()
-                suggestedQuestions = emptyList()
-
                 // AI応答
                 if (gemini != null && isReady) {
                     val userAiMsg = userMsg + (if (latestExpense != null) "\n(対象の支出: ${latestExpense.name} ¥${String.format(Locale.JAPAN, "%,d", latestExpense.amount)})" else "")
@@ -330,8 +276,6 @@ fun ConsultationScreen(
                             accumulatedText += chunk
                             dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = accumulatedText, isUser = false))
                         }
-                        // 生成完了後にサジェストを生成
-                        generateSuggestions(dao.getMessagesForSessionSync(sessionId))
                     } catch (_: Exception) {
                         dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "分析中にエラーが発生しました。", isUser = false))
                     }
@@ -480,94 +424,16 @@ fun ConsultationScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(messages) { msg ->
-                        ChatBubble(ChatMessage(id = msg.id, text = msg.text, isUser = msg.isUser))
+                        ChatBubble(
+                            message = ChatMessage(id = msg.id, text = msg.text, isUser = msg.isUser),
+                            categories = categories
+                        )
                     }
                 }
             }
             
         }
 
-        // サジェストされた質問
-        if (suggestedQuestions.isNotEmpty() && !isGenerating) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 2.dp)
-                    .alpha(if (isAvailable) 1f else 0.5f),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                suggestedQuestions.forEach { question ->
-                    SuggestionChip(
-                        enabled = isReady,
-                        onClick = {
-                            if (isReady && !isGenerating) {
-                                scope.launch {
-                                    val sessionId = currentSessionId ?: UUID.randomUUID().toString()
-                                    dao.insertChatMessage(ChatMessageEntity(sessionId = sessionId, text = question, isUser = true))
-                                    if (currentSessionId == null) {
-                                        dao.upsertChatSession(ChatSessionEntity(id = sessionId, title = question.take(20), lastMessageAt = System.currentTimeMillis()))
-                                        onSessionSelected(sessionId)
-                                    }
-                                    
-                                    val assetContext = buildString {
-                                        if (assets.isNotEmpty()) {
-                                            appendLine("【現在の資産状況】")
-                                            assets.forEach { appendLine("- ${it.name}: ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})") }
-                                        }
-                                        val activeLendings = lendings.filter { !it.isRecovered }
-                                        if (activeLendings.isNotEmpty()) {
-                                            appendLine("【貸付状況】")
-                                            activeLendings.forEach { appendLine("- ${it.personName}への貸付: ¥${String.format(Locale.JAPAN, "%,d", it.amount - it.recoveredAmount)}") }
-                                        }
-                                    }
-                                    val recentTxContext = if (transactions.isNotEmpty()) {
-                                        "【直近の支出記録】\n" + transactions.take(10).joinToString("\n") { 
-                                            "- ${SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(it.date))}: ${it.name} ¥${String.format(Locale.JAPAN, "%,d", it.amount)} (${it.category})"
-                                        } + "\n\n"
-                                    } else ""
-                                    
-                                    val fullPrompt = """
-                                        あなたは丁寧な言葉遣いながらも、事実に基づいた鋭い指摘や皮肉で、ユーザーに現実を突きつける「家計の覗き魔」です。
-                                        資産状況と支出履歴をもとに、ユーザーの質問に対して、冷徹かつ皮肉たっぷりに回答してください。
-                                        
-                                        【回答ルール】
-                                        ・表面上は丁寧（です・ます調）ですが、内容は手厳しく、ユーザーがハッとするような「鋭い指摘」を重視してください。
-                                        ・単なる罵倒ではなく、客観的な事実（残高や金額）から導き出される皮肉を好みます。
-                                        ・「問いかけ：」などのラベル表示、自己紹介、精神論、タメ口は厳禁です。
-                                        ・回答の最後に、文脈を汲み取った自然な聞き方で、ユーザーに追い打ちをかけるような問いかけを一つ添えてください。
-                                        
-                                        $assetContext
-                                        $recentTxContext
-                                        ユーザーの質問: $question
-                                    """.trimIndent()
-
-                                    val aiMsgId = UUID.randomUUID().toString()
-                                    var accumulatedText = ""
-                                    dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "...", isUser = false))
-                                    suggestedQuestions = emptyList()
-
-                                    gemini?.generateResponseStream(fullPrompt)?.collect { chunk ->
-                                        accumulatedText += chunk
-                                        dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = accumulatedText, isUser = false))
-                                    }
-                                    generateSuggestions(dao.getMessagesForSessionSync(sessionId))
-                                }
-                            }
-                        },
-                        label = { Text(question, fontSize = 12.sp) },
-                        colors = SuggestionChipDefaults.suggestionChipColors(
-                            containerColor = Color.Transparent,
-                            labelColor = NotionSafeGreen
-                        ),
-                        border = SuggestionChipDefaults.suggestionChipBorder(
-                            borderColor = NotionSafeGreen.copy(alpha = 0.2f),
-                            enabled = true
-                        )
-                    )
-                }
-            }
-        }
 
         // 入力フォーム
         Column(
@@ -631,7 +497,7 @@ fun ConsultationScreen(
                                         .padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    val icon = getCategoryIcon(selectedTxForConsult!!.category)
+                                    val icon = getCategoryIcon(selectedTxForConsult!!.category, categories)
                                     val color = Color(0xFFE57373)
                                     
                                     Box(
@@ -822,6 +688,16 @@ fun ConsultationScreen(
                                                 onSessionSelected(sessionId)
                                             }
 
+                                            // 会話履歴の取得（直近5件）
+                                            val historyMessages = dao.getMessagesForSessionSync(sessionId)
+                                            val historyContext = if (historyMessages.size > 1) {
+                                                val last5 = historyMessages.dropLast(1).takeLast(5)
+                                                "【これまでの会話履歴】\n" + last5.joinToString("\n") { msg ->
+                                                    val cleanText = msg.text.replace(Regex("\\[TX_CARD:.*?]"), "[支出データ]").take(100)
+                                                    if (msg.isUser) "User: $cleanText" else "AI: $cleanText"
+                                                } + "\n\n"
+                                            } else ""
+
                                             // AIへのプロンプト構築
                                             val assetContext = buildString {
                                                 if (assets.isNotEmpty()) {
@@ -854,6 +730,7 @@ fun ConsultationScreen(
                                                 
                                                 $assetContext
                                                 $recentTxContext
+                                                $historyContext
                                                 $aiContextAdd
                                                 ユーザーの質問: $finalUserMsg
                                             """.trimIndent()
@@ -861,13 +738,11 @@ fun ConsultationScreen(
                                             val aiMsgId = UUID.randomUUID().toString()
                                             var accumulatedText = ""
                                             dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = "...", isUser = false))
-                                            suggestedQuestions = emptyList()
 
                                             gemini.generateResponseStream(fullPrompt).collect { chunk ->
                                                 accumulatedText += chunk
                                                 dao.insertChatMessage(ChatMessageEntity(id = aiMsgId, sessionId = sessionId, text = accumulatedText, isUser = false))
                                             }
-                                            generateSuggestions(dao.getMessagesForSessionSync(sessionId))
                                         }
                                     }
                                 },
@@ -920,7 +795,7 @@ fun ConsultationScreen(
                                     memo = tx.category,
                                     balanceAfter = SimpleDateFormat("MM月dd日", Locale.JAPAN).format(Date(tx.date)),
                                     color = Color(0xFFE57373),
-                                    icon = getCategoryIcon(tx.category),
+                                    icon = getCategoryIcon(tx.category, categories),
                                     onClick = {
                                         selectedTxForConsult = tx
                                         showTxPicker = false
