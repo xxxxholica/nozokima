@@ -30,3 +30,4 @@
 .externalNativeBuild/
 .cxx/
 .idea/
+.artifacts/
