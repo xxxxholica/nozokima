@@ -23,8 +23,8 @@
 -keep class net.lingala.zip4j.exception.** { *; }
 
 # Serialization / Models
--keep class com.example.nozokima.data.local.entities.** { *; }
--keep class com.example.nozokima.model.** { *; }
+-keep class works.hinata.nozokima.data.local.entities.** { *; }
+-keep class works.hinata.nozokima.model.** { *; }
 
 # General
 -keepattributes Signature

@@ -7,7 +7,7 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
-        android:name="com.example.nozokima.NozokimaApplication"
+        android:name="works.hinata.nozokima.NozokimaApplication"
         android:allowBackup="true"
         android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
@@ -28,7 +28,7 @@
         </provider>
 
         <activity
-            android:name="com.example.nozokima.MainActivity"
+            android:name="works.hinata.nozokima.MainActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
